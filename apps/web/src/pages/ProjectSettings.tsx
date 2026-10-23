@@ -1,0 +1,26 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Button } from '@ventilyator/ui';
+import { projectRoles, type Page, type Person, type ProjectDetail } from '@ventilyator/shared';
+import { api } from '../lib/api';
+import { ErrorMessage, Loading } from '../components/common';
+import { Pagination, roleLabels } from '../components/work';
+
+export function ProjectMembers({ project }: { project: ProjectDetail }) {
+  const [q, setQ] = useState('');
+  const [offset, setOffset] = useState(0);
+  const manager = project.myRole === 'MANAGER' && !project.archived;
+  const client = useQueryClient();
+  const refresh = () => { void client.invalidateQueries({ queryKey: ['project', project.id] }); void client.invalidateQueries({ queryKey: ['tasks', project.id] }); };
+  const people = useQuery({ queryKey: ['project-people', project.id, q, offset], queryFn: () => api<Page<Person>>(`/projects/${project.id}/people?q=${encodeURIComponent(q)}&offset=${offset}`), enabled: manager });
+  const member = useMutation({ mutationFn: (data: Record<string, unknown>) => api(`/projects/${project.id}/members`, { method: 'PUT', body: JSON.stringify(data) }), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (userId: string) => api(`/projects/${project.id}/members/${userId}`, { method: 'DELETE' }), onSuccess: refresh });
+  return <><h2>Участники проекта</h2>{member.isError && <ErrorMessage error={member.error} />}{remove.isError && <ErrorMessage error={remove.error} />}<div className="panel table-scroll"><table><thead><tr><th>Сотрудник</th><th>Роль в проекте</th><th>Действия</th></tr></thead><tbody>{project.members.map(m => <tr key={m.userId}><td><strong>{m.user.name}</strong><p className="muted">{m.user.email}</p></td><td>{manager && m.userId !== project.owner.id ? <select aria-label={`Роль ${m.user.name}`} value={m.role} disabled={member.isPending} onChange={e => member.mutate({ userId: m.userId, role: e.target.value })}>{projectRoles.map(role => <option key={role} value={role}>{roleLabels[role]}</option>)}</select> : m.userId === project.owner.id ? 'Владелец' : roleLabels[m.role]}</td><td>{manager && m.userId !== project.owner.id && <Button variant="outline" disabled={remove.isPending} onClick={() => { if (window.confirm(`Удалить ${m.user.name} из проекта? Назначенные задачи останутся без исполнителя.`)) remove.mutate(m.userId); }}>Удалить из проекта</Button>}</td></tr>)}</tbody></table></div>{manager && <section className="panel info-panel"><h2>Добавить сотрудника</h2><p>Участник может менять задачи. Наблюдатель имеет доступ только для чтения.</p><label>Поиск по имени или почте<input value={q} onChange={e => { setQ(e.target.value); setOffset(0); }} /></label>{people.isLoading && <Loading />}{people.isError && <ErrorMessage error={people.error} />}<form onSubmit={e => { e.preventDefault(); member.mutate(Object.fromEntries(new FormData(e.currentTarget))); }}><label>Сотрудник<select aria-label="Сотрудник" name="userId" required>{people.data?.items.filter(p => !project.members.some(m => m.userId === p.id)).map(p => <option key={p.id} value={p.id}>{p.name} · {p.email}</option>)}</select></label><label>Роль<select aria-label="Роль" name="role" defaultValue="MEMBER">{projectRoles.map(role => <option key={role} value={role}>{roleLabels[role]}</option>)}</select></label><Button type="submit" disabled={member.isPending || !people.data?.items.some(p => !project.members.some(m => m.userId === p.id))}>Добавить</Button></form>{people.data && <Pagination offset={offset} total={people.data.total} change={setOffset} />}</section>}</>;
+}
+
+export function ProjectSettings({ project }: { project: ProjectDetail }) {
+  const client = useQueryClient();
+  const [initial, setInitial] = useState({ name: project.name, description: project.description, version: project.version });
+  const update = useMutation({ mutationFn: (data: Record<string, unknown>) => api<typeof initial>(`/projects/${project.id}`, { method: 'PATCH', body: JSON.stringify(data) }), onSuccess: updated => { setInitial(updated); void client.invalidateQueries({ queryKey: ['project', project.id] }); void client.invalidateQueries({ queryKey: ['projects'] }); } });
+  return <section className="panel info-panel"><h2>Настройки проекта</h2><form key={initial.version} onSubmit={e => { e.preventDefault(); update.mutate({ ...Object.fromEntries(new FormData(e.currentTarget)), version: initial.version }); }}><label>Название<input name="name" required maxLength={150} defaultValue={initial.name} /></label><label>Описание<textarea name="description" rows={5} maxLength={20000} defaultValue={initial.description} /></label>{update.isError && <ErrorMessage error={update.error} />}{update.isSuccess && <p role="status">Изменения сохранены.</p>}<Button type="submit" disabled={update.isPending}>Сохранить настройки</Button></form><div className="section-heading"><p className="muted">В архиве задачи и комментарии доступны только для чтения.</p><Button variant="outline" disabled={update.isPending} onClick={() => update.mutate({ archived: !project.archived, version: project.version })}>{project.archived ? 'Восстановить проект' : 'Архивировать проект'}</Button></div></section>;
+}

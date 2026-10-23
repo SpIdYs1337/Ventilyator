@@ -11,7 +11,7 @@ test('local administrator creates a user in the web UI, and sessions can be revo
   await page.getByLabel('Рабочая почта').fill(process.env.ADMIN_EMAIL);
   await page.getByLabel('Пароль', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Войти в рабочее пространство' }).click();
-  await expect(page.getByRole('heading', { name: /Здравствуйте/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Проекты', exact: true })).toBeVisible();
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'PostgreSQL' })).toBeVisible();
   await page.getByRole('tab', { name: 'Пользователи' }).click();
@@ -27,7 +27,7 @@ test('local administrator creates a user in the web UI, and sessions can be revo
   await page.getByLabel('Рабочая почта').fill(email);
   await page.getByLabel('Пароль', { exact: true }).fill(memberPassword);
   await page.getByRole('button', { name: 'Войти в рабочее пространство' }).click();
-  await expect(page.getByRole('heading', { name: 'Здравствуйте, Пользователь E2E.' })).toBeVisible();
+  await expect(page.getByText('Здравствуйте, Пользователь E2E.', { exact: false })).toBeVisible();
   await page.goto('/sessions');
   await expect(page.getByText('Это устройство', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Завершить', exact: true }).click();
