@@ -1,0 +1,7 @@
+# Override для HTTP-проверок только на loopback. Production использует базовый Compose.
+services:
+  ventilyator-proxy:
+    ports: !override
+      - "127.0.0.1:${HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./infrastructure/caddy/dev.Caddyfile:/etc/caddy/Caddyfile:ro

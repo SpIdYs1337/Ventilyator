@@ -1,0 +1,17 @@
+{
+  "name": "@ventilyator/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/main.js",
+    "dev": "tsx watch src/main.ts"
+  },
+  "dependencies": {
+    "@ventilyator/database": "workspace:*",
+    "@ventilyator/config": "workspace:*",
+    "bullmq": "5.81.5",
+    "ioredis": "5.11.1"
+  }
+}

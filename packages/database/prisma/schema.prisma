@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  users     User[]
+  roles     Role[]
+  audit     AuditEvent[]
+  storage   StorageObject[]
+}
+
+model User {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  email          String   @unique
+  name           String
+  passwordHash   String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  roles          UserRole[]
+  sessions       SessionMetadata[]
+  identities     AuthIdentity[]
+  audit          AuditEvent[]
+  @@index([organizationId, active])
+}
+
+model AuthIdentity {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @db.Uuid
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider  String
+  subject   String
+  @@unique([provider, subject])
+}
+
+model Role {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  name           String
+  permissions    RolePermission[]
+  users          UserRole[]
+  @@unique([organizationId, name])
+}
+
+model Permission {
+  key   String @id
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId     String @db.Uuid
+  role       Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission String
+  grant      Permission @relation(fields: [permission], references: [key], onDelete: Restrict)
+  @@id([roleId, permission])
+}
+
+model UserRole {
+  userId String @db.Uuid
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId String @db.Uuid
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@id([userId, roleId])
+}
+
+model SessionMetadata {
+  id         String @id
+  userId     String @db.Uuid
+  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt  DateTime @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+  userAgent  String
+  @@index([userId, revokedAt])
+}
+
+model AuditEvent {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  userId         String? @db.Uuid
+  user           User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         String
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  @@index([organizationId, createdAt])
+}
+
+model StorageObject {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  name           String
+  state          String @default("PENDING")
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  deletedAt      DateTime? @db.Timestamptz(3)
+  versions       StorageObjectVersion[]
+  @@index([organizationId, deletedAt])
+}
+
+model StorageObjectVersion {
+  id        String @id @default(uuid()) @db.Uuid
+  objectId  String @db.Uuid
+  object    StorageObject @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  number    Int
+  size      BigInt
+  sha256    String @db.Char(64)
+  mimeType  String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([objectId, number])
+}

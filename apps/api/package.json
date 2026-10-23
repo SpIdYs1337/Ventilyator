@@ -1,0 +1,34 @@
+{
+  "name": "@ventilyator/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/main.js",
+    "dev": "tsx watch src/main.ts",
+    "admin:create": "tsx src/create-admin.ts"
+  },
+  "dependencies": {
+    "@ventilyator/database": "workspace:*",
+    "@ventilyator/config": "workspace:*",
+    "@ventilyator/shared": "workspace:*",
+    "@ventilyator/validation": "workspace:*",
+    "@nestjs/core": "12.2.0",
+    "@nestjs/common": "12.2.0",
+    "@nestjs/platform-express": "12.2.0",
+    "@nestjs/swagger": "12.0.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "helmet": "8.3.0",
+    "cookie-parser": "1.4.7",
+    "argon2": "0.45.1",
+    "ioredis": "5.11.1",
+    "bullmq": "5.81.5",
+    "imapflow": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/cookie-parser": "1.4.10"
+  }
+}
