@@ -1,0 +1,11 @@
+# Explicit HTTP profile for an isolated test LAN. Production uses HTTPS.
+services:
+  ventilyator-api:
+    environment:
+      NODE_ENV: development
+      APP_ORIGIN: ${LAN_HTTP_ORIGIN:?Run configure-lan.py}
+  ventilyator-proxy:
+    ports: !override
+      - "${BIND_IP:?Run configure-lan.py}:${LAN_HTTP_PORT:-80}:8080"
+    volumes:
+      - ./infrastructure/caddy/lan.Caddyfile:/etc/caddy/Caddyfile:ro

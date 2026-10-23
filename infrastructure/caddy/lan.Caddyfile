@@ -1,0 +1,21 @@
+{
+  admin off
+  auto_https off
+}
+:8080 {
+  header {
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  }
+  @apiDocs path /api/docs /api/docs/* /api/docs-json /api/docs-yaml
+  route {
+    respond @apiDocs 404
+    handle /api/* {
+      reverse_proxy ventilyator-api:3000
+    }
+    handle {
+      reverse_proxy ventilyator-web:8080
+    }
+  }
+}

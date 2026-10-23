@@ -10,6 +10,7 @@ pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
+python3 -m unittest discover -s tests/unit -p 'test_*.py' -v
 ```
 
 В облачной среде домашние каталоги read-only. Используйте `XDG_CACHE_HOME=/workspace/.cache`, `XDG_DATA_HOME=/workspace/.cache/data`, `XDG_STATE_HOME=/workspace/.cache/state`, `npm_config_cache=/workspace/.cache/npm`, `DOCKER_CONFIG=/workspace/.cache/docker`, `PLAYWRIGHT_BROWSERS_PATH=/workspace/.cache/ms-playwright`. Для pnpm задайте `--store-dir /workspace/.cache/pnpm-store`.
@@ -76,12 +77,14 @@ bash infrastructure/scripts/cloud-start.sh
 | Сборка всех 8 пакетов/apps | Успешно, включая Prisma Client, API, worker и web |
 | TypeScript strict / ESLint | Успешно |
 | Unit | 9 passed, 0 failed |
+| Python / настройка LAN HTTP | 8 passed: сохранность конфигурации, закрытый backup, повторный запуск, адрес/порт и отказ от неподходящего .env |
 | Compose config / полный запуск | Успешно, сервисы healthy, migrate exited 0 |
 | PostgreSQL 18.1 / Redis 8.4 | Реальные SELECT / PONG |
 | SQL и Prisma migrations | Применены; schema diff: No difference detected; повторный запуск идемпотентен |
 | Интеграционные API/Identity/BullMQ | 16 passed; временные организации и пользователи удалены |
 | Bootstrap | Первый администратор создан с новым случайным паролем из закрытого файла |
 | Caddy HTTP | HTML, JavaScript, CSS и API readiness возвращают 200 |
+| LAN HTTP profile | Compose merge проверен; существующий администратор входит, читает профиль и выходит; HTTP-cookie работает, чужой Origin получает 403, Swagger закрыт (404) |
 | Container recreation | PostgreSQL-пользователь, Redis-сессия и storage marker сохранились |
 | Worker failure/recovery | Liveness 200 / readiness 503 при остановке, readiness 200 после запуска |
 | Caddy HTTPS | Недоверенный CA отклонён; trusted CA + hostname verification проходят |
