@@ -116,6 +116,24 @@ docker compose logs --tail=100 ventilyator-migrate
 
 Для сборки нужны официальные репозитории Ubuntu/Debian, registry.npmjs.org, Docker Hub/CDN и binaries.prisma.sh. При 403/503 исправьте сетевой доступ или корпоративный proxy; не отключайте TLS, package integrity, apt signatures или Prisma checksums. Dockerfile поддерживает build secret corporate_ca. Скрипт cloud-build.py относится к облачной среде и не нужен на обычной Ubuntu без соответствующих bindings.
 
+Если установка зависимостей завершается TimeoutError, обновите исходники и повторите сборку с полным текстовым логом:
+
+```bash
+cd /opt/ventilyator
+git pull --ff-only origin main
+docker compose --progress plain build ventilyator-api ventilyator-web ventilyator-proxy
+```
+
+Для загрузок заданы 8 параллельных запросов, timeout 180 секунд на запрос и 3 повторные попытки. BuildKit сохраняет пакеты, registry metadata и результаты проверок pnpm между попытками. Кешированные результаты принимаются только по правилам самого pnpm; проверки TLS, lockfile и integrity остаются включёнными. Исходники должны обновляться без перезаписи локальных изменений; при конфликте git pull остановится, а .env и .local игнорируются Git.
+
+Если ошибка повторяется, проверьте доступность registry с хоста:
+
+```bash
+curl --fail --show-error --location --connect-timeout 15 --max-time 60 --output /dev/null --write-out 'HTTP %{http_code}, %{time_total}s\n' https://registry.npmjs.org/jiti/-/jiti-2.7.0.tgz
+```
+
+Успех на хосте не подтверждает доступ из Docker builder. Сохраните строку WARN с URL и последние строки ошибки сборки для диагностики proxy/DNS/соединения внутри builder. Повторная сборка использует сохранённый кеш; очистка кеша для устранения timeout не требуется.
+
 ## 8. Настроить доверие к HTTPS CA
 
 Caddy по умолчанию использует внутренний CA. Экспортируйте только публичный root certificate:
@@ -245,6 +263,6 @@ docker compose logs -f ventilyator-api ventilyator-worker
 
 Не выводите docker compose config без --quiet в общедоступные логи: он содержит значения секретов. Не удаляйте /srv/ventilyator и не используйте down -v или повторную генерацию .env для устранения ошибки.
 
-В облачной среде проверены сборка, 9 unit и 16 API/Identity/BullMQ-проверок, Prisma migrate/schema diff, сохранность PostgreSQL/Redis/storage при пересоздании контейнеров, HTTPS и readiness при отказе worker. Отдельная чистая Ubuntu, браузерные E2E и последняя оптимизация кеширующего слоя Docker требуют проверки на целевом сервере.
+В облачной среде проверены сборка текущего Dockerfile, 9 unit и 16 API/Identity/BullMQ-проверок, Prisma migrate/schema diff, сохранность PostgreSQL/Redis/storage при пересоздании контейнеров, HTTPS и readiness при отказе worker. Отдельная чистая Ubuntu и браузерные E2E требуют проверки на целевом сервере.
 
 SMTP, автоматизированные backup/restore и IMAP-настройки через веб пока не готовы. Перед эксплуатацией необходимо закончить соответствующие этапы и проверить восстановление резервной копии. История фактических проверок — DEVELOPMENT.md.

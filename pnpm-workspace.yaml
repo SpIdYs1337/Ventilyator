@@ -1,6 +1,13 @@
 packages:
   - apps/*
   - packages/*
+# Bound registry traffic on small servers and allow slow downloads to finish.
+networkConcurrency: 8
+fetchTimeout: 180000
+fetchRetries: 3
+fetchRetryFactor: 2
+fetchRetryMintimeout: 5000
+fetchRetryMaxtimeout: 20000
 minimumReleaseAgeExclude:
   - '@zone-eu/mailsplit@5.4.29'
   - i18next@26.5.6

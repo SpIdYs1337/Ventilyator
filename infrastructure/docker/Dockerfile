@@ -20,9 +20,12 @@ COPY packages/config/package.json packages/config/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/validation/package.json packages/validation/package.json
-RUN --mount=type=secret,id=corporate_ca --mount=type=cache,id=ventilyator-pnpm-store,target=/pnpm/store \
+RUN --mount=type=secret,id=corporate_ca \
+    --mount=type=cache,id=ventilyator-pnpm-store,target=/pnpm/store,sharing=locked \
+    --mount=type=cache,id=ventilyator-pnpm-cache,target=/pnpm/cache,sharing=locked \
     if [ -f /run/secrets/corporate_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/corporate_ca; fi; \
-    pnpm install --frozen-lockfile --store-dir /pnpm/store
+    pnpm install --frozen-lockfile --store-dir /pnpm/store --cache-dir /pnpm/cache \
+      --prefer-offline --reporter=append-only
 COPY . .
 RUN --mount=type=secret,id=corporate_ca \
     if [ -f /run/secrets/corporate_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/corporate_ca; fi; \
