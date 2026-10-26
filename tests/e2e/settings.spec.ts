@@ -65,3 +65,14 @@ test('mail settings open before configuration and IMAP can be saved through the 
   await page.getByRole('button', { name: 'Сохранить почтовые настройки', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Настройки сохранены.');
 });
+
+
+test('dashboard metrics navigate to projects and matching personal task filters', async ({ page }) => {
+  await login(page);
+  for (const [label, destination, heading] of [['Активные проекты', '/projects', 'Проекты'], ['Просрочено у меня', '/my-tasks?filter=overdue', 'Мои задачи'], ['Мои сроки за 7 дней', '/my-tasks?filter=upcoming', 'Мои задачи'], ['Мои завершённые', '/my-tasks?filter=completed', 'Мои задачи']]) {
+    await page.goto('/');
+    await page.getByRole('link', { name: new RegExp(`^${label}:`) }).click();
+    await expect(page).toHaveURL(url => url.pathname + url.search === destination);
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+  }
+});

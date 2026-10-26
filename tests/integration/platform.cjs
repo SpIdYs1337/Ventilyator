@@ -76,6 +76,32 @@ async function main() {
       assert.equal((await request(`${page}/publish`, { method: 'POST', cookie: editor, data: { title: 'Denied', content: firstContent, baseRevision: archived.body.revision } })).status, 409);
       const restored = await request(page, { method: 'PATCH', cookie: editor, data: { revision: archived.body.revision, archived: false } }); assert.equal(restored.status, 200); published = restored;
     });
+    const interactive = await request(`${space}/pages`, { method: 'POST', cookie: editor, data: { title: 'Interactive knowledge' } }); assert.equal(interactive.status, 201);
+    const interactivePage = `${space}/pages/${interactive.body.id}`;
+    const interactiveDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'mention', attrs: { id: people.viewer.id, label: 'Spoofed name' } }] }, { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Published checklist' }] }] }] }] };
+    await check('document mentions use accessible employees, canonical names and persistent notices', async () => {
+      const candidates = await request(`${interactivePage}/mentions?q=viewer`, { cookie: editor }); assert.equal(candidates.status, 200); assert.ok(candidates.body.some(person => person.id === people.viewer.id)); assert.ok(!candidates.body.some(person => person.id === people.foreign.id));
+      assert.equal((await request(`${interactivePage}/mentions`, { cookie: outsider })).status, 404);
+      const published = await request(`${interactivePage}/publish`, { method: 'POST', cookie: editor, data: { title: 'Interactive knowledge', content: interactiveDoc, baseRevision: 0 } }); assert.equal(published.status, 201); assert.equal(published.body.content.content[0].content[0].attrs.label, people.viewer.name);
+      const notice = await db.notification.findFirst({ where: { userId: people.viewer.id, pageId: interactive.body.id } }); assert.ok(notice.title.includes('упомянул'));
+      const bad = structuredClone(interactiveDoc); bad.content[0].content[0].attrs.id = people.foreign.id;
+      assert.equal((await request(`${interactivePage}/publish`, { method: 'POST', cookie: editor, data: { title: 'Foreign mention', content: bad, baseRevision: 1 } })).status, 400);
+    });
+    await check('published checklist persists without entering edit mode and never overwrites personal drafts', async () => {
+      await request(`${interactivePage}/draft`, { method: 'PUT', cookie: editor, data: { title: 'Personal draft', content: doc('Keep this draft'), baseRevision: 1 } });
+      assert.equal((await request(`${interactivePage}/checklist`, { method: 'PUT', cookie: viewer, data: { revision: 1, index: 0, checked: true } })).status, 403);
+      assert.equal((await request(`${interactivePage}/checklist`, { method: 'PUT', cookie: outsider, data: { revision: 1, index: 0, checked: true } })).status, 404);
+      const updated = await request(`${interactivePage}/checklist`, { method: 'PUT', cookie: editor, data: { revision: 1, index: 0, checked: true } }); assert.equal(updated.status, 200); assert.equal(updated.body.revision, 2); assert.equal(updated.body.content.content[1].content[0].attrs.checked, true);
+      assert.equal((await request(`${interactivePage}/checklist`, { method: 'PUT', cookie: admin, data: { revision: 1, index: 0, checked: false } })).status, 409);
+      const loaded = (await request(interactivePage, { cookie: editor })).body; assert.equal(loaded.draft.title, 'Personal draft'); assert.equal(loaded.draft.baseRevision, 1); assert.equal(loaded.content.content[1].content[0].attrs.checked, true);
+      assert.equal((await request(`${interactivePage}/versions`, { cookie: viewer })).body.length, 2);
+      assert.equal((await request(`${interactivePage}/publish`, { method: 'POST', cookie: editor, data: { title: loaded.draft.title, content: loaded.draft.content, baseRevision: 1 } })).status, 409);
+    });
+    await check('comment mentions notify only active accessible employees', async () => {
+      const result = await request(`${interactivePage}/comments`, { method: 'POST', cookie: editor, data: { body: `Please review @${people.viewer.email} and @${people.foreign.email}` } }); assert.equal(result.status, 201);
+      const notice = await db.notification.findFirst({ where: { userId: people.viewer.id, eventKey: `page-comment:${result.body.id}` } }); assert.ok(notice.title.includes('упомянул'));
+      assert.equal(await db.notification.count({ where: { userId: people.foreign.id, pageId: interactive.body.id } }), 0);
+    });
     const t1 = await request(`${project}/tasks`, { method: 'POST', cookie: admin, data: { title: 'Основная задача', assigneeId: people.editor.id, estimateMinutes: 90, storyPoints: 5, labels: ['platform'] } }); assert.equal(t1.status, 201); let task = t1.body; const taskBase = `${project}/tasks/${task.id}`;
     const t2 = await request(`${project}/tasks`, { method: 'POST', cookie: editor, data: { title: 'Блокирующая', parentId: task.id, type: 'SUBTASK' } }); assert.equal(t2.status, 201);
     await check('task hierarchy prevents parent cycles', async () => { assert.equal((await request(taskBase, { method: 'PATCH', cookie: editor, data: { version: task.version, parentId: t2.body.id } })).status, 400); assert.equal((await request(`${taskBase}/details`, { cookie: editor })).body.children.length, 1); });
@@ -175,6 +201,18 @@ async function main() {
       assert.equal((await request('/preferences', { method: 'PUT', cookie: editor, data: { widgets: ['knowledge', 'tasks'], emailEnabled: false } })).status, 200);
       assert.deepEqual((await request('/dashboard', { cookie: editor })).body.preferences.widgets, ['knowledge', 'tasks']);
       const report = await request(`${project}/reports`, { cookie: viewer }); assert.equal(report.status, 200); assert.ok(report.body.tasks.find(t => t.id === task.id).spentMinutes >= 31);
+    });
+    await check('dashboard task links expose matching filters with organization and assignment isolation', async () => {
+      const overdue = await request(`${project}/tasks`, { method: 'POST', cookie: admin, data: { title: 'My overdue task', assigneeId: people.editor.id, dueAt: new Date(Date.now() - 86400000).toISOString() } }); assert.equal(overdue.status, 201);
+      const upcoming = await request(`${project}/tasks`, { method: 'POST', cookie: admin, data: { title: 'My upcoming task', assigneeId: people.editor.id, dueAt: new Date(Date.now() + 86400000).toISOString() } }); assert.equal(upcoming.status, 201);
+      const completed = await request(`${project}/tasks`, { method: 'POST', cookie: admin, data: { title: 'My completed task', assigneeId: people.editor.id } }); assert.equal(completed.status, 201);
+      assert.equal((await request(`${project}/tasks/${completed.body.id}`, { method: 'PATCH', cookie: admin, data: { status: 'DONE', version: completed.body.version } })).status, 200);
+      const dashboard = (await request('/dashboard', { cookie: editor })).body;
+      for (const [filter, id, count] of [['overdue', overdue.body.id, dashboard.overdue], ['upcoming', upcoming.body.id, dashboard.upcoming], ['completed', completed.body.id, dashboard.completed]]) {
+        const list = await request(`/my-tasks?filter=${filter}`, { cookie: editor }); assert.equal(list.status, 200); assert.equal(list.body.total, count); assert.ok(list.body.items.some(task => task.id === id));
+        assert.ok(!(await request(`/my-tasks?filter=${filter}`, { cookie: outsider })).body.items.some(task => task.id === id));
+      }
+      assert.equal((await request('/my-tasks')).status, 401);
     });
     await check('deadline scheduler creates one persistent notice per due date and phase', async () => {
       const due = await request(`${project}/tasks`, { method: 'POST', cookie: admin, data: { title: 'Просроченная проверка', assigneeId: people.editor.id, dueAt: new Date(Date.now() - 60000).toISOString() } }); assert.equal(due.status, 201);

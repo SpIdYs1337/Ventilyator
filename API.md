@@ -86,6 +86,8 @@ S=/knowledge/spaces/:spaceId, D=S/pages/:pageId.
 | GET D/versions | offset, 50 неизменяемых версий |
 | POST D/restore/:number | revision текущей страницы; создаёт новую публикацию |
 | GET/POST D/comments | offset, 50 комментариев / body |
+| GET D/mentions | q, до 20 активных сотрудников с доступом к пространству для @упоминаний |
+| PUT D/checklist | revision,index,checked; отметка пункта опубликованной страницы с новой версией, без изменения личных черновиков |
 | GET/POST D/tasks | Доступные связанные задачи / projectId,title, атомарное создание |
 
 Неопубликованная страница видна автору/менеджеру пространства. PageDraft другого редактора не возвращается. Сервер ограничивает структуру документа, объём, URL и вложенность.
@@ -107,6 +109,7 @@ S=/knowledge/spaces/:spaceId, D=S/pages/:pageId.
 
 | Метод и путь | Поведение |
 |---|---|
+| GET /my-tasks | filter=active/overdue/upcoming/completed, offset,limit; назначенные текущему пользователю задачи доступных активных проектов |
 | GET /dashboard | Задачи/сроки/активность/проекты/страницы и preferences |
 | GET /search | q, Russian/simple full text задач/страниц, проекты; ACL |
 | GET /notifications | offset, q=unread для непрочитанных |

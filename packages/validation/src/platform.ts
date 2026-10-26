@@ -12,3 +12,4 @@ export const mailSettingsSchema = z.object({ smtpEnabled: z.boolean(), smtpHost:
 export const mailTestSchema = z.object({ email: z.email(), password: z.string().min(1).max(256).optional() }).strict();
 export const quotaSchema = z.object({ bytes: z.number().int().min(1048576).max(10995116277760) }).strict();
 export const pageTaskCreateSchema = z.object({ projectId: z.uuid(), title: z.string().trim().min(1).max(250) }).strict();
+export const myTasksSchema = z.object({ filter: z.enum(['active', 'overdue', 'upcoming', 'completed']).default('active'), offset: z.coerce.number().int().min(0).max(100000).default(0), limit: z.coerce.number().int().min(1).max(100).default(50) }).strict();

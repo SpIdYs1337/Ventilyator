@@ -7,7 +7,7 @@ function inline(text: string): RichNode[] {
     const value = match[0];
     if (value.startsWith('**')) result.push({ type: 'text', text: value.slice(2, -2), marks: [{ type: 'bold' }] });
     else if (value.startsWith('`')) result.push({ type: 'text', text: value.slice(1, -1), marks: [{ type: 'code' }] });
-    else { const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(value)!; result.push(safeLink(link[2]) ? { type: 'text', text: link[1], marks: [{ type: 'link', attrs: { href: link[2], target: '_blank', rel: 'noopener noreferrer nofollow', class: null } }] } : { type: 'text', text: value }); }
+    else { const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(value)!; result.push(safeLink(link[2]) ? { type: 'text', text: link[1], marks: [{ type: 'link', attrs: { href: link[2], target: '_self', rel: 'noopener noreferrer nofollow', class: null } }] } : { type: 'text', text: value }); }
     from = match.index! + value.length;
   }
   if (from < text.length) result.push({ type: 'text', text: text.slice(from) });

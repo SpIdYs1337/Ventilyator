@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@ventilyator/database';
-import { defaultWorkflow, documentText, type CurrentUser, type RichNode, type ProjectRole, type Workflow } from '@ventilyator/shared';
+import { defaultWorkflow, documentText, mentionedUserIds, commentMentionEmails, type CurrentUser, type RichNode, type ProjectRole, type Workflow } from '@ventilyator/shared';
 import { Infrastructure } from '../infrastructure';
 import { ProjectsService, personSelect } from '../work/projects.service';
 import { pageNotifications } from '../notifications/events';
@@ -103,17 +103,54 @@ export class KnowledgeService {
     const draft = await this.infra.db.pageDraft.findUnique({ where: { pageId_userId: { pageId: id, userId: user.id } } });
     return { ...page, draft };
   }
+  private mentionAccess(spaceId: string): Prisma.UserWhereInput {
+    return { OR: [{ spaceMemberships: { some: { spaceId } } }, { ownedSpaces: { some: { id: spaceId } } }, { roles: { some: { role: { permissions: { some: { permission: 'knowledge:manage' } } } } } }] };
+  }
+  async mentionCandidates(user: CurrentUser, spaceId: string, id: string, q: string) {
+    await this.page(user, spaceId, id);
+    return this.infra.db.user.findMany({ where: { organizationId: user.organizationId, active: true, ...this.mentionAccess(spaceId), AND: [{ OR: [{ name: { contains: q, mode: 'insensitive' } }, { email: { contains: q, mode: 'insensitive' } }] }] }, select: { id: true, name: true, email: true }, take: 20, orderBy: { name: 'asc' } });
+  }
+  private async mentionPeople(user: CurrentUser, spaceId: string, ids: string[], tx: Prisma.TransactionClient) {
+    if (ids.length > 100) throw new BadRequestException('Не более 100 упоминаний на документ');
+    const people = await tx.user.findMany({ where: { id: { in: ids }, active: true, organizationId: user.organizationId, ...this.mentionAccess(spaceId) }, select: { id: true, name: true } });
+    if (people.length !== ids.length) throw new BadRequestException('Упомянутый сотрудник не имеет доступа к пространству или отключён');
+    return new Map(people.map(person => [person.id, person.name]));
+  }
+  checklist(user: CurrentUser, spaceId: string, id: string, data: { revision: number; index: number; checked: boolean }) {
+    return this.write(user, spaceId, async tx => {
+      const page = await this.page(user, spaceId, id, tx);
+      if (page.archived || !page.publishedAt) throw new ConflictException('Чек-лист доступен на опубликованной странице вне архива');
+      if (page.revision !== data.revision) throw new ConflictException('Страница изменилась. Обновите её и повторите отметку.');
+      const content = structuredClone(page.content) as unknown as RichNode;
+      let index = 0; let item: RichNode | undefined;
+      const walk = (node: RichNode) => { if (node.type === 'taskItem' && index++ === data.index) item = node; node.content?.forEach(walk); };
+      walk(content);
+      if (!item) throw new NotFoundException('Пункт чек-листа не найден');
+      if (item.attrs?.checked === data.checked) return page;
+      item.attrs = { ...item.attrs, checked: data.checked };
+      const updated = await tx.knowledgePage.update({ where: { id }, data: { content: content as unknown as Prisma.InputJsonValue, revision: { increment: 1 } }, include: { author: { select: personSelect } } });
+      await tx.pageRevision.create({ data: { pageId: id, organizationId: user.organizationId, number: updated.revision, title: updated.title, content: updated.content as Prisma.InputJsonValue, authorId: user.id } });
+      await tx.auditEvent.create({ data: { organizationId: user.organizationId, userId: user.id, action: `page.checklist_changed:${id}:${data.index}` } });
+      return updated;
+    });
+  }
   save(user: CurrentUser, spaceId: string, id: string, data: { title: string; content: RichNode; baseRevision: number }, publish: boolean) {
     return this.write(user, spaceId, async tx => {
       const previous = await this.page(user, spaceId, id, tx);
       if (previous.archived) throw new ConflictException('Страница в архиве');
+      const mentionIds = mentionedUserIds(data.content);
+      const names = await this.mentionPeople(user, spaceId, mentionIds, tx);
+      const canonical = structuredClone(data.content);
+      const normalize = (node: RichNode) => { if (node.type === 'mention') node.attrs = { id: String(node.attrs!.id).toLowerCase(), label: names.get(String(node.attrs!.id).toLowerCase())! }; node.content?.forEach(normalize); };
+      normalize(canonical);
+      data = { ...data, content: canonical };
       if (!publish) return tx.pageDraft.upsert({ where: { pageId_userId: { pageId: id, userId: user.id } }, create: { pageId: id, userId: user.id, organizationId: user.organizationId, title: data.title, content: data.content as unknown as Prisma.InputJsonValue, baseRevision: data.baseRevision }, update: { title: data.title, content: data.content as unknown as Prisma.InputJsonValue, baseRevision: data.baseRevision } });
       if (previous.revision !== data.baseRevision) throw new ConflictException('Есть новая версия страницы. Ваш личный черновик сохранён; сравните версии перед публикацией.');
       const page = await tx.knowledgePage.update({ where: { id }, data: { title: data.title, content: data.content as unknown as Prisma.InputJsonValue, text: documentText(data.content), revision: { increment: 1 }, publishedAt: new Date() }, include: { author: { select: personSelect } } });
       await tx.pageRevision.create({ data: { pageId: id, organizationId: user.organizationId, number: page.revision, title: page.title, content: page.content as Prisma.InputJsonValue, authorId: user.id } });
       await tx.pageDraft.deleteMany({ where: { pageId: id, userId: user.id } });
       await tx.auditEvent.create({ data: { organizationId: user.organizationId, userId: user.id, action: `page.published:${id}:${page.revision}` } });
-      await pageNotifications(tx, user, page, `page:${id}:${page.revision}`, 'опубликовал страницу');
+      await pageNotifications(tx, user, page, `page:${id}:${page.revision}`, 'опубликовал страницу', mentionIds.filter(id => !mentionedUserIds(previous.content as unknown as RichNode).includes(id)));
       return page;
     });
   }
@@ -148,8 +185,12 @@ export class KnowledgeService {
     return this.write(user, spaceId, async tx => {
       const page = await this.page(user, spaceId, id, tx);
       if (page.archived || !page.publishedAt) throw new ConflictException('Комментарии доступны для опубликованной страницы');
+      const emails = commentMentionEmails(body);
+      if (emails.length > 100) throw new BadRequestException('Не более 100 упоминаний');
+      const mentionPeople = await tx.user.findMany({ where: { email: { in: emails }, active: true, organizationId: user.organizationId, ...this.mentionAccess(spaceId) }, select: { id: true } });
+      const mentionIds = mentionPeople.map(person => person.id);
       const result = await tx.pageComment.create({ data: { pageId: id, organizationId: user.organizationId, authorId: user.id, body }, include: { author: { select: personSelect } } });
-      await pageNotifications(tx, user, page, `page-comment:${result.id}`, 'прокомментировал страницу');
+      await pageNotifications(tx, user, page, `page-comment:${result.id}`, 'прокомментировал страницу', mentionIds);
       return result;
     });
   }

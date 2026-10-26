@@ -28,6 +28,15 @@ export class PortalService {
     ]);
     return { tasks, overdue, upcoming, completed, projects, spaces, recentPages, unread, preferences, activity };
   }
+  async myTasks(user: CurrentUser, query: { filter: 'active' | 'overdue' | 'upcoming' | 'completed'; offset: number; limit: number }) {
+    const now = new Date(), week = new Date(now.getTime() + 7 * 86400000);
+    const where: Prisma.TaskWhereInput = { organizationId: user.organizationId, assigneeId: user.id, project: { ...this.projects.visibility(user), archived: false }, ...(query.filter === 'completed' ? { completedAt: { not: null } } : { completedAt: null }), ...(query.filter === 'overdue' ? { dueAt: { lt: now } } : query.filter === 'upcoming' ? { dueAt: { gte: now, lte: week } } : {}) };
+    const [items, total] = await this.infra.db.$transaction([
+      this.infra.db.task.findMany({ where, select: { id: true, projectId: true, number: true, title: true, status: true, dueAt: true, project: { select: { key: true, name: true } } }, orderBy: [{ dueAt: { sort: 'asc', nulls: 'last' } }, { updatedAt: 'desc' }], skip: query.offset, take: query.limit }),
+      this.infra.db.task.count({ where }),
+    ]);
+    return { items, total, offset: query.offset, limit: query.limit };
+  }
   async notifications(user: CurrentUser, offset: number, unread: boolean) {
     const where = { ...this.notices(user), ...(unread ? { readAt: null } : {}) };
     const [items, total, unreadCount] = await this.infra.db.$transaction([this.infra.db.notification.findMany({ where, orderBy: { createdAt: 'desc' }, skip: offset, take: 50 }), this.infra.db.notification.count({ where }), this.infra.db.notification.count({ where: { ...this.notices(user), readAt: null } })]);

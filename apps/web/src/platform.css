@@ -36,3 +36,18 @@
   .top-actions button[aria-label="Компактный режим"] { display: inline-flex; }
   .compact .content { padding: 16px; }
 }
+
+.rich-editor, .mention-input { position: relative; }
+.user-mention { color: var(--green); background: var(--soft); border-radius: 4px; padding: 1px 4px; font-weight: 600; overflow-wrap: anywhere; }
+.mention-menu { position: absolute; z-index: 40; left: 0; top: 100%; width: 300px; max-width: 100%; max-height: 280px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px #20243a24; padding: 6px; }
+.mention-menu button { display: flex; flex-direction: column; gap: 4px; text-align: left; border: 0; border-radius: 5px; padding: 10px; background: transparent; color: var(--text); width: 100%; }
+.mention-menu button[aria-selected="true"], .mention-menu button:hover { background: var(--soft); }
+.mention-menu small, .mention-menu p { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.rich-document input[type="checkbox"]:disabled { cursor: not-allowed; }
+a.metric { cursor: pointer; }
+a.metric:hover, a.metric:focus-visible { border-color: var(--green); background: var(--soft); }
+.dashboard-widget .section-heading h2 a { display: inline-flex; gap: 8px; align-items: center; }
+.tabs > a { padding: 0 0 14px; font-size: 12px; border-bottom: 2px solid transparent; flex-shrink: 0; color: var(--muted); }
+.tabs > a[aria-current="page"] { border-color: var(--green); color: var(--green); }
+.my-tasks-list { padding: 0 20px; }
+.my-tasks-list strong small { display: block; margin-top: 5px; color: var(--muted); font-weight: 400; }

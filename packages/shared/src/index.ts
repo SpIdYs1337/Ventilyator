@@ -14,3 +14,4 @@ export interface SystemStatus { postgres: boolean; redis: boolean; storage: bool
 export * from './work';
 export * from './knowledge';
 export * from './mail';
+export * from './mentions';

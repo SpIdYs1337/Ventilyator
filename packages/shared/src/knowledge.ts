@@ -2,6 +2,7 @@ export interface RichNode { type: string; text?: string; attrs?: Record<string, 
 export interface RichDocument extends RichNode { type: 'doc'; content: RichNode[] }
 export const emptyDocument: RichDocument = { type: 'doc', content: [{ type: 'paragraph' }] };
 export function documentText(node: RichNode): string {
+  if (node.type === 'mention') return `@${String(node.attrs?.label ?? '')}`;
   if (node.type === 'text') return node.text ?? '';
   if (node.type === 'hardBreak') return '\n';
   return (node.content ?? []).map(documentText).join(['doc', 'bulletList', 'orderedList', 'taskList', 'table', 'tableRow'].includes(node.type) ? '\n' : '') + (['paragraph', 'heading', 'codeBlock'].includes(node.type) ? '\n' : '');

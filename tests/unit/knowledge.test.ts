@@ -6,11 +6,23 @@ import { encryptSecret, decryptSecret } from '../../packages/config/src/secrets'
 import { mkdtemp, mkdir, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mentionedUserIds, commentMentionEmails, documentText } from '../../packages/shared/src';
 import { importMarkdown, tableMarkdown } from '../../apps/web/src/lib/markdown';
 
 describe('rich documents', () => {
   it('accepts structured tables, lists and protected images', () => {
     expect(validDocument({ type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Раздел' }] }, { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph' }] }] }, { type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', attrs: { colspan: 1, rowspan: 1, colwidth: null, align: null }, content: [{ type: 'paragraph' }] }] }] }, { type: 'image', attrs: { src: '/api/files/12345678-1234-1234-1234-123456789012/download?inline=1' } }] })).toBe(true);
+  });
+  it('validates mention identity/labels and indexes their readable names', () => {
+    const id = '12345678-1234-4234-9234-123456789012';
+    const mention = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'mention', attrs: { id, label: 'Сотрудник' } }] }] };
+    expect(validDocument(mention)).toBe(true); expect(mentionedUserIds(mention)).toEqual([id]); expect(documentText(mention)).toContain('@Сотрудник');
+    for (const attrs of [{ id: '../bad', label: 'Bad' }, { id, label: '' }, { id, label: 'Bad', href: 'javascript:alert(1)' }]) expect(validDocument({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'mention', attrs }] }] })).toBe(false);
+    expect(commentMentionEmails('Review @USER@example.org and @user@example.org')).toEqual(['user@example.org']);
+  });
+  it('accepts current Tiptap link title attributes while rejecting malformed titles', () => {
+    const content = (title: unknown) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Projects', marks: [{ type: 'link', attrs: { href: '/projects', target: '_self', rel: 'noopener noreferrer', class: null, title } }] }] }] });
+    expect(validDocument(content(null))).toBe(true); expect(validDocument(content('Open projects'))).toBe(true); expect(validDocument(content({ onclick: 'x' }))).toBe(false);
   });
   it('rejects executable links, tracking images and unsupported nodes', () => {
     for (const href of ['javascript:alert(1)', 'data:text/html,hello', '//evil.invalid', '/\\evil.invalid', 'https://a.invalid\u0000']) expect(safeLink(href)).toBe(false);
