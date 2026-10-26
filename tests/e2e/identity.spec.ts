@@ -11,7 +11,7 @@ test('local administrator creates a user in the web UI, and sessions can be revo
   await page.getByLabel('Рабочая почта').fill(process.env.ADMIN_EMAIL);
   await page.getByLabel('Пароль', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Войти в рабочее пространство' }).click();
-  await expect(page.getByRole('heading', { name: 'Проекты', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Рабочий стол', exact: true })).toBeVisible();
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'PostgreSQL' })).toBeVisible();
   await page.getByRole('tab', { name: 'Пользователи' }).click();

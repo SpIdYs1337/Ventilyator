@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -9,7 +10,8 @@ import { Infrastructure } from './infrastructure';
 import { DatabaseErrorFilter } from './database-error.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { logger: ['log', 'warn', 'error'] });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: ['log', 'warn', 'error'] });
+  app.useBodyParser('json', { limit: '2mb' });
   const infra = app.get(Infrastructure);
   // API has no published port; only one reverse proxy is trusted.
   app.getHttpAdapter().getInstance().set('trust proxy', 1);

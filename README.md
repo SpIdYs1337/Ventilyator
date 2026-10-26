@@ -1,58 +1,39 @@
 # Ventilyator
 
-Автономная корпоративная платформа для внутренней сети организации. Данные PostgreSQL, Redis и файлового хранилища находятся на собственном сервере. Обязательных облачных сервисов нет.
+Корпоративные проекты, задачи и база знаний на собственном Ubuntu-сервере. Работа через браузер, без клиентского приложения и обязательных облачных сервисов. PostgreSQL, Redis и файлы остаются в локальной сети.
 
-**Текущее состояние:** локальные пользователи, проекты с участниками и правами, задачи, список и доска, комментарии и история изменений. Это промежуточный рабочий этап, ещё не полная платформа из задания. База знаний, вложения, настраиваемые процессы, SMTP и веб-настройки IMAP пока не реализованы. Результаты проверок — в [DEVELOPMENT.md](DEVELOPMENT.md); оставшиеся этапы — в [ROADMAP.md](ROADMAP.md).
+В этой версии работают:
 
-Работа с проектами и обновление существующего сервера: [docs/projects-tasks.md](docs/projects-tasks.md).
+- Адаптивный рабочий стол, тёмная тема, поиск, календарь и внутренние уведомления.
+- Проекты и участники, список и Kanban, настраиваемые статусы/переходы/WIP, подзадачи, зависимости, чек-листы, наблюдение, спринты, временная шкала, отчёты и учёт времени с таймером.
+- Пространства знаний, дерево страниц, Tiptap, таблицы, изображения, оглавление, личные черновики, публикация с проверкой конфликтов, история и восстановление версий, обсуждения, Markdown и печать в PDF.
+- Связи документов и задач, создание задачи из страницы, защищённые локальные вложения с версиями, SHA-256, квотой и корзиной.
+- Локальные пользователи через веб-панель, роли, блокировка, сброс/смена пароля и отзыв сессий.
+- Дополнительно включаемые SMTP-уведомления и IMAP-вход: веб-настройки, тест подключения, явное связывание и ограниченное автосоздание сотрудников.
+- Согласованное резервное копирование PostgreSQL и файлов, проверка целостности, восстановление в отдельную пустую установку, скрипт обновления.
 
-## Локальные пользователи обязательны
+Это самостоятельная рабочая версия с собственным дизайном Ventilyator. Полное соответствие всем возможностям Jira и Confluence ещё не достигнуто: совместное редактирование в реальном времени, автоматизация, согласования, произвольные поля и часть аналитики остаются в [ROADMAP.md](ROADMAP.md). Проверки и ограничения перечислены в [DEVELOPMENT.md](DEVELOPMENT.md).
 
-Первый администратор создаётся отдельной одноразовой командой. Остальных локальных пользователей администратор создаёт через веб-интерфейс «Администрирование → Пользователи → Добавить сотрудника». Локальный вход не зависит от почтового сервера. IMAP и уведомления — дополнительные, отдельно включаемые возможности; требование их реализации сохраняется в дорожной карте.
+## Обновить уже установленный сервер
 
-## Стек
-
-pnpm workspaces, Node.js 24 LTS, TypeScript strict, React, Vite, Tailwind, Radix/shadcn-style UI, TanStack Query, Zustand, React Hook Form, Zod; NestJS, Prisma 7 + PostgreSQL adapter, PostgreSQL 18, Redis 8, BullMQ; Caddy. Версии пакетов зафиксированы в `pnpm-lock.yaml`, базовые образы — по digest. TypeScript 6 выбран для совместимости с NestJS Swagger; предварительные версии не используются.
-
-## Запуск на Ubuntu
-
-Подробная инструкция: [INSTALLATION.md](INSTALLATION.md).
-
-```bash
-git clone --branch main --single-branch https://github.com/SpIdYs1337/Ventilyator.git
-cd Ventilyator
-python3 infrastructure/scripts/configure.py --host ventilyator.company.local
-sudo sh infrastructure/scripts/prepare-host.sh /srv/ventilyator
-docker compose up -d --build
-docker compose ps
-```
-
-Далее создайте первого администратора по инструкции. В системе нет заранее известного пароля и автоматического демо-пользователя.
-
-Для уже установленного тестового сервера доступ по IP без настройки компьютера с браузером:
+Все команды выполняются **на Ubuntu-сервере** в существующем checkout:
 
 ```bash
+cd /opt/ventilyator
 git pull --ff-only origin main
-python3 infrastructure/scripts/configure-lan.py 192.168.1.50
-docker compose up -d --no-build --wait --wait-timeout 180
+bash infrastructure/scripts/deploy.sh
 ```
 
-Замените IP адресом сервера и откройте `http://192.168.1.50`. Существующие пользователи и данные сохраняются. HTTP передаёт пароль без шифрования; этот режим предназначен только для изолированной тестовой сети. Подробности — в начале [INSTALLATION.md](INSTALLATION.md).
+Скрипт собирает образы, создаёт закрытую согласованную резервную копию существующей установки, применяет миграции и ждёт готовности сервисов. `.env`, адрес браузера, пользователи и данные сохраняются. После обновления откройте прежний локальный адрес и обновите вкладку. Повторно создавать администратора не нужно.
 
-Для изолированной HTTP-проверки разработчика:
+Команды и действия после входа: [DEPLOYMENT.md](DEPLOYMENT.md). Полная подготовка чистой Ubuntu через GitHub: [INSTALLATION.md](INSTALLATION.md).
 
-```bash
-python3 infrastructure/scripts/configure.py --development --data-root "$(pwd)/.local/data"
-sudo sh infrastructure/scripts/prepare-host.sh "$(pwd)/.local/data"
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
+## Устройство
 
-`.env` не перезаписывается; повторно генерировать его поверх работающей установки нельзя. HTTP-override публикует порт только на loopback.
+Node.js 24 LTS, TypeScript strict, React/Vite, Tiptap, TanStack Query; NestJS, Prisma 7, PostgreSQL 18, Redis 8, BullMQ, Nodemailer, ImapFlow и Caddy. Зависимости зафиксированы в `pnpm-lock.yaml`, базовые образы — по digest. Нет S3, MinIO, CDN и обязательного внешнего сервиса при обычной работе.
 
-## Структура
-
-`apps/web` — интерфейс; `apps/api` — модульный backend; `apps/worker` — отдельный обработчик; `packages/database` — Prisma и миграции; `packages/shared`, `validation`, `config`, `ui` — общие пакеты; `infrastructure` — Compose, Caddy и скрипты; `tests` — модульные, интеграционные и браузерные проверки.
+`apps/web` — интерфейс; `apps/api` — API; `apps/worker` — очередь и сроки; `packages/database` — схема/миграции; `packages/shared`, `validation`, `config`, `ui` — общие пакеты; `infrastructure` — Docker, Caddy и эксплуатационные скрипты; `tests` — модульные, интеграционные и браузерные проверки.
 
 ## Документация
 
-[Архитектура](ARCHITECTURE.md) · [Конфигурация](CONFIGURATION.md) · [Безопасность](SECURITY.md) · [База данных](DATABASE.md) · [Хранилище](STORAGE.md) · [API](API.md) · [Разработка](DEVELOPMENT.md) · [Эксплуатация](OPERATIONS.md) · [Резервные копии](BACKUP_RESTORE.md) · [Исходное задание](docs/requirements.md).
+[Развёртывание](DEPLOYMENT.md) · [Установка](INSTALLATION.md) · [Проекты](docs/projects-tasks.md) · [База знаний](docs/knowledge.md) · [Конфигурация](CONFIGURATION.md) · [Архитектура](ARCHITECTURE.md) · [Безопасность](SECURITY.md) · [База данных](DATABASE.md) · [Файлы](STORAGE.md) · [API](API.md) · [Проверки](DEVELOPMENT.md) · [Эксплуатация](OPERATIONS.md) · [Резервные копии](BACKUP_RESTORE.md) · [Исходное задание](docs/requirements.md).

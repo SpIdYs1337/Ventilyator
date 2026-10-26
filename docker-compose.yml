@@ -21,6 +21,10 @@ x-backend: &backend
     NO_PROXY: localhost,127.0.0.1,ventilyator-api,ventilyator-web,ventilyator-postgres,ventilyator-redis
     no_proxy: localhost,127.0.0.1,ventilyator-api,ventilyator-web,ventilyator-postgres,ventilyator-redis
     SESSION_MAX_DAYS: ${SESSION_MAX_DAYS:-30}
+    MAIL_CA_FILE: ${MAIL_CA_FILE:-}
+    ANTIVIRUS_REQUIRED: ${ANTIVIRUS_REQUIRED:-false}
+    CLAMAV_HOST: ${CLAMAV_HOST:-}
+    CLAMAV_PORT: ${CLAMAV_PORT:-3310}
   networks: [backend]
   logging: &logging
     driver: json-file
@@ -62,7 +66,7 @@ services:
   ventilyator-migrate:
     <<: *backend
     restart: "no"
-    command: [pnpm, db:migrate]
+    command: [node, packages/database/node_modules/prisma/build/index.js, migrate, deploy, --config, packages/database/prisma.config.ts]
     depends_on:
       ventilyator-postgres: { condition: service_healthy }
   ventilyator-api:
@@ -87,6 +91,8 @@ services:
   ventilyator-worker:
     <<: *backend
     command: [node, apps/worker/dist/main.js]
+    volumes: ["${DATA_ROOT:-/srv/ventilyator}/storage:/app/storage"]
+    networks: [backend, frontend]
     depends_on:
       ventilyator-migrate: { condition: service_completed_successfully }
       ventilyator-redis: { condition: service_healthy }

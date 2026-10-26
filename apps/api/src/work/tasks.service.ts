@@ -1,11 +1,11 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@ventilyator/database';
-import type { CurrentUser } from '@ventilyator/shared';
+import { defaultWorkflow, type CurrentUser, type Workflow } from '@ventilyator/shared';
 import type { CreateTaskInput, UpdateTaskInput, TaskListInput } from '@ventilyator/validation';
 import { ProjectsService, personSelect } from './projects.service';
+import { taskNotifications } from '../notifications/events';
 
 const taskInclude = { author: { select: personSelect }, assignee: { select: personSelect } };
-const closed = (status: string) => ['DONE', 'CLOSED'].includes(status);
 
 @Injectable()
 export class TasksService {
@@ -16,6 +16,7 @@ export class TasksService {
     const where: Prisma.TaskWhereInput = {
       organizationId: user.organizationId, projectId, ...(query.status ? { status: query.status } : {}),
       ...(query.mine === 'true' ? { assigneeId: user.id } : {}),
+      ...(query.sprintId ? { sprintId: query.sprintId === 'backlog' ? null : query.sprintId } : {}),
       ...(query.q ? { OR: [{ title: { contains: query.q, mode: 'insensitive' } }, { description: { contains: query.q, mode: 'insensitive' } }] } : {}),
     };
     const [items, total] = await this.projects.infra.db.$transaction([
@@ -43,20 +44,32 @@ export class TasksService {
   create(user: CurrentUser, projectId: string, input: CreateTaskInput) {
     return this.projects.write(user, projectId, async tx => {
       await this.assignee(tx, user, projectId, input.assigneeId);
+      await this.related(tx, user, projectId, null, input);
       const project = await tx.project.update({ where: { id: projectId }, data: { nextTaskNumber: { increment: 1 } } });
+      const workflow = (project.workflow as unknown as Workflow | null) ?? defaultWorkflow;
+      const limit = workflow.statuses.find(s => s.key === 'NEW')?.wipLimit;
+      if (limit && await tx.task.count({ where: { projectId, status: 'NEW' } }) >= limit) throw new ConflictException('Достигнут WIP-лимит новых задач');
       const task = await tx.task.create({ data: { ...input, dueAt: input.dueAt ? new Date(input.dueAt) : null, projectId, organizationId: user.organizationId, authorId: user.id, number: project.nextTaskNumber }, include: taskInclude });
       await tx.taskEvent.create({ data: { taskId: task.id, organizationId: user.organizationId, actorId: user.id, action: 'task.created', changes: {} } });
       await tx.auditEvent.create({ data: { organizationId: user.organizationId, userId: user.id, action: `task.created:${task.id}` } });
+      await taskNotifications(tx, user, task, `task-created:${task.id}`, 'создал задачу');
       return task;
     });
   }
 
   update(user: CurrentUser, projectId: string, id: string, input: UpdateTaskInput) {
-    return this.projects.write(user, projectId, async tx => {
+    return this.projects.write(user, projectId, async (tx, project) => {
       const previous = await this.load(user, projectId, id, tx);
       const { version, ...fields } = input;
       if (previous.version !== version) throw new ConflictException('Задача изменена другим сотрудником. Обновите её и повторите изменение.');
       await this.assignee(tx, user, projectId, input.assigneeId);
+      await this.related(tx, user, projectId, id, input);
+      const workflow = (project.workflow as unknown as Workflow | null) ?? defaultWorkflow;
+      if (input.status && !workflow.statuses.some(s => s.key === input.status)) throw new BadRequestException('Статус не предусмотрен процессом проекта');
+      if (input.status && input.status !== previous.status && workflow.transitions.length) {
+        const transition = workflow.transitions.find(t => t.from === previous.status && t.to === input.status);
+        if (!transition || (transition.managerOnly && project.myRole !== 'MANAGER')) throw new ForbiddenException('Переход не разрешён рабочим процессом');
+      }
       const changes: Record<string, Prisma.InputJsonValue> = {};
       for (const [key, after] of Object.entries(fields)) {
         const value = previous[key as keyof typeof fields];
@@ -65,10 +78,18 @@ export class TasksService {
       }
       if (!Object.keys(changes).length) return previous;
       const status = input.status ?? previous.status;
-      const completedAt = closed(status) ? (previous.completedAt ?? new Date()) : null;
+      const limit = workflow.statuses.find(s => s.key === status)?.wipLimit;
+      if (status !== previous.status && limit && await tx.task.count({ where: { projectId, status } }) >= limit) throw new ConflictException('Достигнут WIP-лимит выбранного статуса');
+      const done = workflow.statuses.some(s => s.key === status && s.done);
+      if (done) {
+        const dependencies = await tx.taskDependency.findMany({ where: { taskId: id }, include: { dependsOn: { select: { status: true } } } });
+        if (dependencies.some(d => !workflow.statuses.some(s => s.key === d.dependsOn.status && s.done))) throw new ConflictException('Сначала завершите блокирующие задачи');
+      }
+      const completedAt = done ? (previous.completedAt ?? new Date()) : null;
       const task = await tx.task.update({ where: { id }, data: { ...fields, ...(fields.dueAt !== undefined ? { dueAt: fields.dueAt ? new Date(fields.dueAt) : null } : {}), completedAt, version: { increment: 1 } }, include: taskInclude });
       await tx.taskEvent.create({ data: { taskId: id, organizationId: user.organizationId, actorId: user.id, action: 'task.updated', changes } });
       await tx.auditEvent.create({ data: { organizationId: user.organizationId, userId: user.id, action: `task.updated:${id}` } });
+      await taskNotifications(tx, user, task, `task-updated:${id}:${task.version}`, 'изменил задачу');
       return task;
     });
   }
@@ -87,10 +108,24 @@ export class TasksService {
 
   comment(user: CurrentUser, projectId: string, id: string, body: string) {
     return this.projects.write(user, projectId, async tx => {
-      await this.load(user, projectId, id, tx);
+      const task = await this.load(user, projectId, id, tx);
       const comment = await tx.taskComment.create({ data: { body, taskId: id, organizationId: user.organizationId, authorId: user.id }, include: { author: { select: personSelect } } });
       await tx.auditEvent.create({ data: { organizationId: user.organizationId, userId: user.id, action: `task.commented:${id}` } });
+      await taskNotifications(tx, user, task, `task-comment:${comment.id}`, 'прокомментировал задачу');
       return comment;
     });
+  }
+
+  private async related(tx: Prisma.TransactionClient, user: CurrentUser, projectId: string, id: string | null, input: { parentId?: string | null; sprintId?: string | null; dueAt?: string | null; startsAt?: string | null }) {
+    if (input.startsAt && input.dueAt && new Date(input.startsAt) > new Date(input.dueAt)) throw new BadRequestException('Начало должно быть раньше срока');
+    if (input.sprintId && !await tx.sprint.findFirst({ where: { id: input.sprintId, projectId, organizationId: user.organizationId, status: { not: 'CLOSED' } } })) throw new BadRequestException('Спринт не найден или закрыт');
+    let parent = input.parentId; const seen = new Set<string>();
+    while (parent) {
+      if (parent === id || seen.has(parent) || seen.size >= 100) throw new BadRequestException('Цикл или слишком глубокая иерархия задач');
+      seen.add(parent);
+      const row = await tx.task.findFirst({ where: { id: parent, projectId, organizationId: user.organizationId } });
+      if (!row) throw new BadRequestException('Родительская задача должна быть в этом проекте');
+      parent = row.parentId;
+    }
   }
 }

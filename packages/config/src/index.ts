@@ -18,3 +18,4 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (c.NODE_ENV === 'production' && !c.APP_ORIGIN.startsWith('https://')) throw new Error('Production requires HTTPS APP_ORIGIN');
   return c;
 }
+export { encryptSecret, decryptSecret, mailCa } from './secrets';

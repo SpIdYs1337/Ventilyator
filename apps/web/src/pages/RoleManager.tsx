@@ -1,0 +1,20 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Button } from '@ventilyator/ui';
+import { permissionKeys, type CurrentUser } from '@ventilyator/shared';
+import { api } from '../lib/api';
+import { ErrorMessage, Loading } from '../components/common';
+import { Modal } from '../components/work';
+interface Role { id: string; name: string; permissions: { permission: string }[]; users: { userId: string }[]; _count: { users: number } }
+const labels: Record<string, string> = { 'system:read': 'Состояние системы', 'users:manage': 'Управление сотрудниками', 'roles:manage': 'Управление ролями', 'sessions:revoke': 'Отзыв сессий сотрудников', 'audit:read': 'Просмотр аудита', 'projects:create': 'Создание проектов', 'projects:manage': 'Управление всеми проектами организации', 'knowledge:create': 'Создание пространств знаний', 'knowledge:manage': 'Управление всеми пространствами организации', 'mail:manage': 'Почта и корпоративный вход', 'storage:manage': 'Состояние и квоты хранилища' };
+export function RoleManager({ user }: { user: CurrentUser }) {
+  const [editing, setEditing] = useState<Role | 'new' | null>(null); const client = useQueryClient();
+  const roles = useQuery({ queryKey: ['roles'], queryFn: () => api<Role[]>('/admin/roles') });
+  const remove = useMutation({ mutationFn: (id: string) => api(`/admin/roles/${id}`, { method: 'DELETE' }), onSuccess: () => { void client.invalidateQueries({ queryKey: ['roles'] }); } });
+  return <><div className="section-heading"><h2>Роли организации</h2><Button onClick={() => setEditing('new')}>Создать роль</Button></div>{roles.isLoading && <Loading />}{roles.isError && <ErrorMessage error={roles.error} />}{remove.isError && <ErrorMessage error={remove.error} />}<div className="panel table-scroll"><table><thead><tr><th>Роль</th><th>Разрешения</th><th>Сотрудники</th><th>Действия</th></tr></thead><tbody>{roles.data?.map(role => <tr key={role.id}><td><strong>{role.name}</strong></td><td>{role.permissions.map(p => labels[p.permission] ?? p.permission).join(', ') || 'Только права участия в объектах'}</td><td>{role._count?.users ?? '—'}</td><td><div className="inline-actions"><Button variant="outline" onClick={() => setEditing(role)}>Изменить</Button>{!role._count?.users && <Button variant="ghost" onClick={() => remove.mutate(role.id)}>Удалить</Button>}</div></td></tr>)}</tbody></table></div>{editing && <RoleForm user={user} role={editing === 'new' ? null : editing} close={() => setEditing(null)} />}</>;
+}
+function RoleForm({ user, role, close }: { user: CurrentUser; role: Role | null; close: () => void }) {
+  const [permissions, setPermissions] = useState(role?.permissions.map(p => p.permission) ?? []); const client = useQueryClient(); const own = role?.users?.some(u => u.userId === user.id);
+  const save = useMutation({ mutationFn: (name: string) => api(role ? `/admin/roles/${role.id}` : '/admin/roles', { method: role ? 'PUT' : 'POST', body: JSON.stringify({ name, permissions }) }), onSuccess: () => { void client.invalidateQueries({ queryKey: ['roles'] }); close(); } });
+  return <Modal title={role ? 'Изменение роли' : 'Новая роль'} description="Можно делегировать только собственные разрешения. Права на конкретные проекты и пространства назначаются отдельно." close={close}><form onSubmit={e => { e.preventDefault(); save.mutate(String(new FormData(e.currentTarget).get('name'))); }}><label>Название роли<input name="name" required maxLength={100} defaultValue={role?.name} /></label><div className="permission-list">{permissionKeys.map(key => <label key={key} className="checkbox"><input type="checkbox" disabled={own || !user.permissions.includes(key)} checked={permissions.includes(key)} onChange={e => setPermissions(e.target.checked ? [...permissions, key] : permissions.filter(p => p !== key))} />{labels[key]}</label>)}</div>{own && <p className="muted footnote">Разрешения собственной роли изменять нельзя.</p>}{save.isError && <ErrorMessage error={save.error} />}<Button type="submit" disabled={save.isPending}>Сохранить роль</Button></form></Modal>;
+}

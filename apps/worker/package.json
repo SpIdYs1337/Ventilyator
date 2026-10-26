@@ -9,9 +9,13 @@
     "dev": "tsx watch src/main.ts"
   },
   "dependencies": {
-    "@ventilyator/database": "workspace:*",
     "@ventilyator/config": "workspace:*",
+    "@ventilyator/database": "workspace:*",
     "bullmq": "5.81.5",
-    "ioredis": "5.11.1"
+    "ioredis": "5.11.1",
+    "nodemailer": "10.2.1"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "8.0.2"
   }
 }

@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import type { Request, Response } from 'express';
 import type { CurrentUser } from '@ventilyator/shared';
 import { ImapFlow } from 'imapflow';
+import { mailCa } from '@ventilyator/config';
 
 const DAY = 86400;
 export const hashSession = (raw: string) => createHash('sha256').update(raw).digest('hex');
@@ -24,16 +25,32 @@ export class AuthService {
 
   async login(body: { email: string; password: string; remember: boolean; provider: 'local' | 'imap' }, req: Request, res: Response) {
     await this.throttle(body.email, req.ip ?? 'unknown');
-    const user = await this.infra.db.user.findUnique({ where: { email: body.email }, include: { identities: true } });
+    let user = await this.infra.db.user.findUnique({ where: { email: body.email }, include: { identities: true } });
     let valid = false;
     if (body.provider === 'local') {
       valid = await argon2.verify(user?.passwordHash ?? await this.dummyHash, body.password);
     } else {
       const c = this.infra.config;
-      // An existing account is never linked merely because an IMAP login uses the same email.
-      if (user?.active && c.IMAP_HOST && c.IMAP_DOMAIN && user.organizationId === c.IMAP_ORGANIZATION_ID && body.email.split('@')[1] === c.IMAP_DOMAIN.toLowerCase() && user.identities.some(i => i.provider === 'imap' && i.subject === body.email)) {
-        const client = new ImapFlow({ host: c.IMAP_HOST, port: c.IMAP_PORT, secure: true, tls: { rejectUnauthorized: true, minVersion: 'TLSv1.2' }, auth: { user: body.email, pass: body.password }, logger: false, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000 });
+      const domain = body.email.split('@')[1]!;
+      const settings = user ? await this.infra.db.organizationSettings.findUnique({ where: { organizationId: user.organizationId } }) : await this.infra.db.organizationSettings.findUnique({ where: { imapDomain: domain } });
+      const enabled = settings ? settings.imapEnabled && settings.imapDomain === domain : Boolean(user && c.IMAP_HOST && c.IMAP_DOMAIN?.toLowerCase() === domain && user.organizationId === c.IMAP_ORGANIZATION_ID);
+      // Existing accounts must be linked explicitly by an authorized administrator.
+      const linked = user ? user.active && user.identities.some(i => i.provider === 'imap' && i.subject === body.email) : Boolean(settings?.imapAutoCreate && settings.imapRoleId);
+      if (enabled && linked) {
+        const client = new ImapFlow({ host: settings?.imapHost ?? c.IMAP_HOST!, port: settings?.imapPort ?? c.IMAP_PORT, secure: true, tls: { rejectUnauthorized: true, minVersion: 'TLSv1.2', ca: await mailCa() }, auth: { user: body.email, pass: body.password }, logger: false, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000 });
         try { await client.connect(); valid = true; } catch { valid = false; } finally { client.close(); }
+        if (valid && !user && settings?.imapRoleId) {
+          user = await this.infra.db.$transaction(async tx => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`identity:${body.email}`}))`;
+            const existing = await tx.user.findUnique({ where: { email: body.email }, include: { identities: true } });
+            if (existing) return existing.organizationId === settings.organizationId && existing.identities.some(i => i.provider === 'imap' && i.subject === body.email) ? existing : null;
+            const role = await tx.role.findFirst({ where: { id: settings.imapRoleId!, organizationId: settings.organizationId }, include: { permissions: true } });
+            if (!role || role.permissions.some(p => p.permission !== 'knowledge:create')) return null;
+            const created = await tx.user.create({ data: { email: body.email, name: body.email.split('@')[0]!, organizationId: settings.organizationId, identities: { create: { provider: 'imap', subject: body.email } }, roles: { create: { roleId: role.id } } }, include: { identities: true } });
+            await tx.auditEvent.create({ data: { organizationId: settings.organizationId, userId: created.id, action: 'user.imap_provisioned' } });
+            return created;
+          });
+        }
       }
     }
     if (!user?.active || !valid) {

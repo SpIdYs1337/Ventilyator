@@ -36,10 +36,10 @@ export class ProjectsService {
   async list(user: CurrentUser, query: { offset: number; limit: number; archived: string }) {
     const where = { ...this.visibility(user), archived: query.archived === 'true' };
     const [items, total] = await this.infra.db.$transaction([
-      this.infra.db.project.findMany({ where, include: { owner: { select: personSelect }, _count: { select: { tasks: true, members: true } } }, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], skip: query.offset, take: query.limit }),
+      this.infra.db.project.findMany({ where, include: { owner: { select: personSelect }, members: { where: { userId: user.id }, select: { role: true } }, _count: { select: { tasks: true, members: true } } }, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], skip: query.offset, take: query.limit }),
       this.infra.db.project.count({ where }),
     ]);
-    return { items, total, offset: query.offset, limit: query.limit };
+    return { items: items.map(p => ({ ...p, myRole: user.permissions.includes('projects:manage') || p.ownerId === user.id ? 'MANAGER' : p.members[0]?.role ?? 'VIEWER' })), total, offset: query.offset, limit: query.limit };
   }
 
   async create(user: CurrentUser, input: CreateProjectInput) {
@@ -96,6 +96,11 @@ export class ProjectsService {
   }
 
   private async clearAssignments(tx: Prisma.TransactionClient, user: CurrentUser, projectId: string, userId: string) {
+    const timer = await tx.taskTimer.findFirst({ where: { userId, task: { projectId } } });
+    if (timer) {
+      await tx.timeEntry.create({ data: { taskId: timer.taskId, organizationId: user.organizationId, userId, startedAt: timer.startedAt, minutes: Math.max(1, Math.min(10080, Math.ceil((Date.now() - timer.startedAt.getTime()) / 60000))), note: 'Таймер остановлен при изменении доступа к проекту' } });
+      await tx.taskTimer.delete({ where: { userId } });
+    }
     const assigned = await tx.task.findMany({ where: { projectId, assigneeId: userId }, select: { id: true } });
     await tx.task.updateMany({ where: { projectId, assigneeId: userId }, data: { assigneeId: null, version: { increment: 1 } } });
     if (assigned.length) await tx.taskEvent.createMany({ data: assigned.map(task => ({ organizationId: user.organizationId, taskId: task.id, actorId: user.id, action: 'task.updated', changes: { assigneeId: { before: userId, after: null } } })) });

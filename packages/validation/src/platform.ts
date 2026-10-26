@@ -1,0 +1,14 @@
+import { z } from 'zod';
+const safeName = (value: string) => !Array.from(value).some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 || c === '/' || c === '\\');
+export const uploadSchema = z.object({ name: z.string().trim().min(1).max(200).refine(safeName), size: z.number().int().min(1).max(26214400), objectId: z.uuid().optional() }).strict();
+export const fileUpdateSchema = z.object({ name: z.string().trim().min(1).max(200).refine(safeName).optional(), deleted: z.boolean().optional() }).strict();
+export const preferencesSchema = z.object({ emailEnabled: z.boolean().optional(), widgets: z.array(z.enum(['tasks', 'projects', 'knowledge', 'activity'])).max(4).optional() }).strict();
+export const userUpdateSchema = z.object({ name: z.string().trim().min(1).max(100).optional(), active: z.boolean().optional(), roleId: z.uuid().optional() }).strict();
+export const resetPasswordSchema = z.object({ password: z.string().min(14).max(256) }).strict();
+export const changePasswordSchema = resetPasswordSchema.extend({ currentPassword: z.string().min(1).max(256) }).strict();
+export const imapLinkSchema = z.object({ enabled: z.boolean() }).strict();
+const host = z.string().max(253).refine(v => !Array.from(v).some(c => c.charCodeAt(0) <= 32 || c === '/' || c === '@' || c === '\\'));
+export const mailSettingsSchema = z.object({ smtpEnabled: z.boolean(), smtpHost: host, smtpPort: z.number().int().min(1).max(65535), smtpMode: z.enum(['TLS', 'STARTTLS']), smtpUser: z.string().max(254), smtpPassword: z.string().max(1024).optional(), senderEmail: z.union([z.email(), z.literal('')]), senderName: z.string().trim().min(1).max(100), imapEnabled: z.boolean(), imapHost: host, imapPort: z.number().int().min(1).max(65535), imapDomain: z.string().trim().toLowerCase().regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/).nullable(), imapAutoCreate: z.boolean(), imapRoleId: z.uuid().nullable() }).strict().refine(v => (!v.smtpEnabled || (v.smtpHost && v.senderEmail)) && (!v.imapEnabled || (v.imapHost && v.imapDomain && (!v.imapAutoCreate || v.imapRoleId))));
+export const mailTestSchema = z.object({ email: z.email(), password: z.string().min(1).max(256).optional() }).strict();
+export const quotaSchema = z.object({ bytes: z.number().int().min(1048576).max(10995116277760) }).strict();
+export const pageTaskCreateSchema = z.object({ projectId: z.uuid(), title: z.string().trim().min(1).max(250) }).strict();

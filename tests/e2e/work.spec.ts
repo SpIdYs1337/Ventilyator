@@ -7,7 +7,7 @@ async function login(page: Page, email: string, password: string) {
   await page.getByLabel('Рабочая почта').fill(email);
   await page.getByLabel('Пароль', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Войти в рабочее пространство' }).click();
-  await expect(page.getByRole('heading', { name: 'Проекты', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Рабочий стол', exact: true })).toBeVisible();
 }
 
 test('project, member, assigned task, status, comment and history work through the UI', async ({ page }) => {
@@ -26,7 +26,7 @@ test('project, member, assigned task, status, comment and history work through t
   await page.getByLabel('Роль', { exact: true }).selectOption({ label: 'Team Member' });
   await page.getByRole('button', { name: 'Создать', exact: true }).click();
   await expect(page.getByRole('cell', { name: email, exact: true })).toBeVisible();
-  await page.goto('/');
+  await page.goto('/projects');
   await page.getByRole('button', { name: 'Создать проект', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Название', { exact: true }).fill(projectName);
@@ -46,6 +46,9 @@ test('project, member, assigned task, status, comment and history work through t
   await dialog.getByLabel('Название', { exact: true }).fill(`Задача ${tag}`);
   await dialog.getByLabel('Исполнитель', { exact: true }).selectOption({ label: `Сотрудник ${tag}` });
   await dialog.getByLabel('Приоритет', { exact: true }).selectOption('HIGH');
+  await dialog.getByLabel('Оценка, минуты', { exact: true }).fill('60');
+  await dialog.getByLabel('Story points', { exact: true }).fill('3');
+  await dialog.getByLabel('Метки через запятую', { exact: true }).fill('web, tested');
   await dialog.getByRole('button', { name: 'Создать задачу', exact: true }).click();
   await page.getByRole('heading', { name: `Задача ${tag}`, exact: true }).click();
   await expect(page.getByText(`Исполнитель: Сотрудник ${tag}`, { exact: true })).toBeVisible();
@@ -68,6 +71,19 @@ test('project, member, assigned task, status, comment and history work through t
   await page.getByRole('checkbox', { name: 'Назначенные мне', exact: true }).check();
   await page.getByRole('heading', { name: `Задача ${tag}`, exact: true }).click();
   await expect(page.getByLabel('Статус задачи', { exact: true })).toHaveValue('IN_PROGRESS');
+  await page.getByLabel('Новый пункт чек-листа', { exact: true }).fill('Проверить интерфейс');
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Проверить интерфейс', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Проверить интерфейс', exact: true })).toBeChecked();
+  await page.getByRole('button', { name: 'Записать время', exact: true }).click();
+  await dialog.getByLabel('Минуты', { exact: true }).fill('25');
+  await dialog.getByLabel('Дата и время работы', { exact: true }).fill('2026-10-26T09:00');
+  await dialog.getByRole('button', { name: 'Записать время', exact: true }).click();
+  await expect(page.getByText(`Сотрудник ${tag} · 25 мин`, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Запустить таймер', exact: true }).click();
+  await page.getByRole('button', { name: 'Остановить таймер', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Запустить таймер', exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText('Описание сохранено через браузер', { exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Проверить интерфейс', exact: true })).toBeChecked();
 });

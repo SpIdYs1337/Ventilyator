@@ -1,8 +1,6 @@
 # Разработка и проверки
 
-Используйте существующий checkout: каждая облачная задача уже изолирована. Не создавайте worktree без явного запроса пользователя.
-
-Нужны Node 24 LTS, pnpm 11.25.0, Docker Compose ≥2.24.4, Python 3. Все зависимости зафиксированы; TypeScript 6 согласован с peer constraints NestJS Swagger. Не обновляйте пакеты на prerelease для устранения ошибки установки.
+Нужны Node 24 LTS, pnpm 11.25.0, Python 3, Docker и Compose ≥2.24.4. Работайте в существующем checkout. Пакеты зафиксированы lockfile, prerelease не используются.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -10,64 +8,96 @@ pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
-python3 -m unittest discover -s tests/unit -p 'test_*.py' -v
+python3 -m unittest discover -s tests/unit -p 'test_*.py'
 ```
 
-В облачной среде домашние каталоги read-only. Используйте `XDG_CACHE_HOME=/workspace/.cache`, `XDG_DATA_HOME=/workspace/.cache/data`, `XDG_STATE_HOME=/workspace/.cache/state`, `npm_config_cache=/workspace/.cache/npm`, `DOCKER_CONFIG=/workspace/.cache/docker`, `PLAYWRIGHT_BROWSERS_PATH=/workspace/.cache/ms-playwright`. Для pnpm задайте `--store-dir /workspace/.cache/pnpm-store`.
+В облачной среде используйте writable cache: XDG_CACHE_HOME=/workspace/.cache, XDG_DATA_HOME=/workspace/.cache/data, DOCKER_CONFIG=/workspace/.cache/docker, pnpm --store-dir /workspace/.cache/pnpm-store. BuildKit сохраняет store и metadata/cache отдельно. Proxy/доверенный CA поддерживаются через локальный cloud-build.py override. TLS, lockfile/integrity, supply-chain policies и Prisma checksum не отключаются. Нужен доступ к binaries.prisma.sh/registry/Docker Hub.
 
-Сборка под корпоративным прокси использует стандартные HTTP_PROXY/HTTPS_PROXY, build secret `corporate_ca` и разрешение имени прокси в Docker builder. Локальный `.local/cloud-build.yml` создаётся только для облачной машины, секретов не содержит, Git его игнорирует. Не отключайте проверку TLS или Prisma checksum. Требуемое дополнение allowlist: binaries.prisma.sh.
+## Интеграционные проверки
 
-## Интеграция
-
-После полного запуска development Compose:
+Только изолированная development-установка, никогда production. Сценарии создают случайные временные данные; API-наборы удаляют свои организации. PostgreSQL/Redis/storage настоящие, ответы не подменяются.
 
 ```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
 docker compose exec -T ventilyator-api node tests/integration/smoke.cjs
 docker compose exec -T ventilyator-api node tests/integration/work.cjs
+python3 tests/integration/migrations.py
+python3 tests/integration/backup_restore.py
 ```
 
-Сценарий создаёт временные организации и случайные credentials, проверяет реальные PostgreSQL/Redis/API/BullMQ, CSRF, организационную изоляцию, административное создание пользователя, запрет повышения прав, отзыв сессии и аудит; затем удаляет свои данные. Запуск в NODE_ENV=production запрещён.
+Migrations создаёт и удаляет отдельную временную базу, не меняя исходную. Backup/restore намеренно приостанавливает API/worker и запускает отдельный Compose project с пустыми данными/другими паролями/портом 18081. Не запускайте его параллельно API/E2E/persistence-тестам. Для override тестовой среды передайте VENTILYATOR_TEST_COMPOSE_FILES; по умолчанию base:dev.
 
-Второй сценарий проверяет проекты/задачи на настоящей PostgreSQL: ACL, составные FK, назначения, конкурентную выдачу номеров и сохранение, архив/восстановление, комментарии, историю и отзыв членства. Он также удаляет свои fixtures. Эти API-проверки не заменяют браузерный сценарий.
+## Почтовая интеграция и файлы
 
-## Браузер
-
-Создайте development-администратора по INSTALLATION.md, оставив его пароль в закрытом локальном файле на время тестов. Затем:
+Набор platform.cjs поднимает локальные TLS SMTP, STARTTLS SMTP и IMAP fixtures. Сертификат выдаётся временным тестовым CA, hostname и TLS реально проверяются, worker действительно доставляет письмо на локальный fixture. Наружу почта не отправляется. API и worker должны видеть именно тестовый CA-файл; используйте только development override:
 
 ```bash
-pnpm exec playwright install chromium
-ADMIN_EMAIL=admin@company.local ADMIN_PASSWORD_FILE="$PWD/.local/admin-password" pnpm test:e2e
+mkdir -p .local
+cat > .local/mail-test.yml <<'YAML'
+services:
+  ventilyator-api:
+    environment:
+      MAIL_CA_FILE: /app/storage/.keys/platform-test-ca.pem
+  ventilyator-worker:
+    environment:
+      MAIL_CA_FILE: /app/storage/.keys/platform-test-ca.pem
+YAML
+export COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml:.local/mail-test.yml
+docker compose up -d --no-build --wait --wait-timeout 180
+docker compose exec -T ventilyator-api node tests/integration/platform.cjs
 ```
 
-Если системный Chromium уже установлен, загрузка браузера из CDN не нужна:
+Fixture создаёт/удаляет только временные тестовые сертификаты, SMTP-ключ приложения сохраняется. Проверяется ClamAV INSTREAM на локальном имитаторе: clean/found/недоступность обязательного сканера. Это проверка протокола, не антивирусной базы настоящего clamd.
+
+После почтовых проверок вернитесь к обычному base:dev Compose. Настоящие корпоративные SMTP/IMAP/CA не использовались.
+
+## Браузерные сценарии
+
+На development-базе с отдельным администратором и закрытым файлом его пароля:
 
 ```bash
 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium \
-  ADMIN_EMAIL=admin@company.local ADMIN_PASSWORD_FILE="$PWD/.local/admin-password" pnpm test:e2e
+  ADMIN_EMAIL=admin@company.local \
+  ADMIN_PASSWORD_FILE="$PWD/.local/admin-password" pnpm test:e2e
 ```
 
-Проверки desktop и mobile создают пользователей через интерфейс и входят под ними. Сценарий work также создаёт проект, приглашает участника, назначает задачу, меняет статус, сохраняет описание, комментарий и проверяет историю. Используйте изолированную development-базу; созданные E2E-пользователи/проекты остаются в ней. Трассировка выключена, чтобы не сохранять пароли в HAR/trace. Тесты не создают фиктивных production-аккаунтов и не используют общий известный пароль.
+Можно установить браузер через `pnpm exec playwright install chromium`; здесь CDN отвечал403, поэтому использован системный Chromium154. Пароль не печатается и не передаётся argv. Trace/HAR выключены. Не запускайте набор многократно с одним email без учёта лимита 12 входов за 15 минут; защиту входа не отключайте. E2E-данные сохраняются в development-базе для проверки интерфейса, используйте отдельную тестовую организацию.
 
-## Дополнительные проверки
+Desktop и Pixel7 emulation проходят локального пользователя/сессии, проект/приглашение/задачу/статус/историю, чек-лист/ручное время/таймер, личный черновик/публикацию/восстановление, файл с точными байтами, Markdown-таблицу/изображение/оглавление и повторное открытие. Мобильная проверка включает отсутствие горизонтального overflow документа. Это Chromium emulation, не испытание всех реальных iOS/Android устройств.
 
-```bash
-VENTILYATOR_TEST_ENV=development ADMIN_EMAIL=admin@ventilyator.local \
-  ADMIN_PASSWORD_FILE="$PWD/.local/admin-password" python3 tests/integration/persistence.py
-python3 tests/integration/tls.py
-```
+## Результаты этой работы
 
-Первая проверка пересоздаёт development-контейнеры, проверяет сохранность пользователя, Redis-сессии и байтов storage, затем останавливает/запускает worker и проверяет readiness. Вторая запускает временный Caddy на loopback-порту 8443, проверяет отказ недоверенного CA и успешный HTTPS с доверенным CA. Нельзя запускать эти сценарии параллельно: persistence намеренно перезапускает стек.
+| Проверка | Результат |
+|---|---|
+| Frozen dependencies, Prisma Client, все 8 пакетов/apps | Сборка успешна |
+| TypeScript strict / ESLint | Успешно |
+| TypeScript unit | 19 passed: документы/XSS/структура/таблицы, Markdown, файловые границы и AES-GCM vault |
+| Python unit | 12 passed: LAN-конфигурация и проверка backup/архивов |
+| Identity/API/BullMQ | 16 passed |
+| Проекты/задачи/ACL/конкурентные записи | 26 passed |
+| Знания/planning/files/поиск/настройки/почта | 38 passed; в том числе worker SMTP TLS, STARTTLS verify, IMAP login/link/provision, дедупликация сроков и обязательный ClamAV-протокол |
+| SQL migrations | 3 passed на отдельной свежей базе: цепочка, сохранение REVIEW/пользователя, backfill разрешения |
+| Schema drift | No difference detected |
+| Backup/restore | 4 passed: согласованная копия, отдельное восстановление с другими паролями БД/Redis, ключ SMTP, запрет перезаписи |
+| Browser desktop/mobile | 8 passed; документы с таблицами/изображениями, задачи/время и пользователи |
+| Полный deploy.sh | Выполнен: сборка → согласованный backup → migrate → запуск и healthchecks |
+| Docker backend/web/proxy | Сборка и полный запуск успешны; API/worker/web/PG/Redis healthy, migrate Exited0 |
+| Целевой чистый Ubuntu / корпоративная почта / настоящий ClamAV | Не проверены |
 
-Если Playwright CDN недоступен, предусмотрен `infrastructure/docker/e2e.Dockerfile` с Chromium из подписанных Debian-репозиториев. Соберите его после backend и используйте Linux `--network host`, чтобы browser origin оставался `http://localhost:8080`. Передайте закрытый файл пароля отдельным read-only mount; tests/config можно примонтировать read-only, а каталог test-results — отдельно writable. Переменная PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH поддерживает системный Chromium.
+В ходе браузерных проверок исправлены проверка актуальных table align attrs Tiptap и мобильный фокус: DOM focus происходит до создания ProseMirror-транзакции, чтобы не отправлять устаревшую transaction. Чек-лист сохраняется асинхронно с оптимистичным отображением и откатом при ошибке. Реальные тесты повторяются после изменений, а не объявляются успешными по сборке.
 
-## Повторный запуск облачного снимка
+Vite предупреждает о чанке редактора примерно993kB и основном чанке примерно519kB до gzip. Редактор вынесен из первоначальной загрузки по маршруту; дальнейшее уменьшение остаётся задачей оптимизации. Vitest предупреждает о будущем изменении configLoader для CommonJS-конфига; текущие тесты проходят. Нагрузочные испытания, аудит безопасности и полный паритет Jira/Confluence не выполнены.
+
+Ранее в этой же среде проверены HTTPS Caddy с trusted CA/hostname, LAN cookie/CSRF/Swagger404, сохранность PostgreSQL/Redis/storage после пересоздания и readiness503 при остановленном worker с восстановлением200. Это не приёмка пользовательского Ubuntu. Публикация облачного снимка/восстановление в новой облачной задаче не выполнялись.
+
+## Возобновление облачной development-среды
 
 ```bash
 bash infrastructure/scripts/cloud-install.sh
 bash infrastructure/scripts/cloud-start.sh
 ```
 
-Install повторно использует сохранённый проверенный pnpm store офлайн; если его нет, требуется сеть. Start запускает сохранённые Docker-образы и проверяет readiness/HTML. Если образы не сохранились, выполните обычную сборку:
+Для пересборки текущих исходников:
 
 ```bash
 python3 infrastructure/scripts/cloud-build.py
@@ -77,38 +107,4 @@ DOCKER_CONFIG=/workspace/.cache/docker docker compose \
 bash infrastructure/scripts/cloud-start.sh
 ```
 
-Это не процедура обновления production. После изменения исходников необходимо пересобрать образы. `.local` содержит только локальные артефакты/конфигурацию и закрытый пароль development-администратора; не коммитьте его и не используйте такой bootstrap-пароль в production.
-
-## Фактически выполнено в этой среде
-
-| Проверка | Результат |
-|---|---|
-| Установка зависимостей и повторная offline-установка | Успешно, frozen lockfile и package integrity сохранены |
-| Сборка всех 8 пакетов/apps | Успешно, включая Prisma Client, API, worker и web |
-| TypeScript strict / ESLint | Успешно |
-| Unit | 9 passed, 0 failed |
-| Python / настройка LAN HTTP | 8 passed: сохранность конфигурации, закрытый backup, повторный запуск, адрес/порт и отказ от неподходящего .env |
-| Compose config / полный запуск | Успешно, сервисы healthy, migrate exited 0 |
-| PostgreSQL 18.1 / Redis 8.4 | Реальные SELECT / PONG |
-| SQL и Prisma migrations | Применены; schema diff: No difference detected; повторный запуск идемпотентен |
-| Интеграционные API/Identity/BullMQ | 16 passed; временные организации и пользователи удалены |
-| Интеграционные проекты/задачи | 26 passed; ACL, FK, конкурентные номера/сохранение, комментарии/история, архив/восстановление, понижение роли и отзыв доступа; fixtures удалены |
-| Bootstrap | Первый администратор создан с новым случайным паролем из закрытого файла |
-| Caddy HTTP | HTML, JavaScript, CSS и API readiness возвращают 200 |
-| LAN HTTP profile | Compose merge проверен; существующий администратор входит, читает профиль и выходит; HTTP-cookie работает, чужой Origin получает 403, Swagger закрыт (404) |
-| Container recreation | PostgreSQL-пользователь, Redis-сессия и storage marker сохранились |
-| Проекты после пересоздания API/worker | 2 созданных через браузер проекта и сохранённые описания задач доступны; существующий администратор входит |
-| Worker failure/recovery | Liveness 200 / readiness 503 при остановке, readiness 200 после запуска |
-| Caddy HTTPS | Недоверенный CA отклонён; trusted CA + hostname verification проходят |
-| Browser E2E | 6 passed: Identity и проекты/задачи на desktop/mobile, системный Chromium 154 |
-| IMAP с корпоративным сервером | Не выполнено: сервер не настроен; проверен отказ неявного связывания локальной учётной записи |
-| SMTP, backup/restore | Ещё не реализованы |
-| Отдельный Ubuntu Server | Не проверен |
-
-Первоначальная чистая сборка Docker-образов успешна. После сетевых 503 приложение также пересобиралось с `--network=none` на ранее проверенных зависимостях; совпадение lockfile отдельно проверено. После восстановления сети успешно выполнена полная сборка текущего Dockerfile для backend/web/proxy, включая кешируемый слой зависимостей.
-
-Для медленной сети в pnpm-workspace.yaml настроены networkConcurrency=8, fetchTimeout=180000, fetchRetries=3 и интервалы повторов 5–20 секунд. Все шесть параметров проверены через pnpm config get. BuildKit сохраняет отдельно store и metadata/cache pnpm; стандартные проверки TLS, lockfile, package integrity и supply-chain policies остаются включёнными. При повторной установке использованы все 539 пакетов из кеша без скачивания; команда pnpm сообщила 4,7 секунды. Это измерение тёплого кеша в данной среде, не обещание скорости первой сборки на другом сервере.
-
-Контейнеры текущей машины проверены, восстановление в новой облачной задаче ещё не проверялось. Публикация версии облачной среды не выполнялась. Наличие кода в GitHub проверяется отдельно через git ls-remote.
-
-Для текущего проектного среза выполнены обычные Docker-сборки backend/web, миграция существующей development-базы без удаления пользователей, повторный migrate deploy и Prisma schema diff без расхождений. Typecheck, lint, 9 TypeScript-unit, 8 Python-unit, 26 проектных и 16 прежних интеграционных проверок прошли. Браузерные тесты выполнились с `/usr/bin/chromium` 154.0.8037.57: 6 passed, desktop и mobile. Playwright CDN всё ещё возвращает 403; установленный системный браузер позволил выполнить сценарии. Во время нескольких пересборок заполнился 32 GB облачный диск; удалён неиспользуемый обычный build cache, данные и рабочие образы сохранены, стек после этого запущен и проверен. Это проверка данной облачной машины, не приёмка пользовательского Ubuntu-сервера.
+Не коммитьте .env, .local, пароли, backups и test-results. На маленьком облачном диске VFS build cache может занимать значительно больше места, чем размер образов; удаляйте только неиспользуемый обычный build cache, сохраняя данные и dependency cache. Production-update выполняется по DEPLOYMENT.md.

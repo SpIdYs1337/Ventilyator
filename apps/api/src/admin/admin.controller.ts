@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Body, Req, Res, Param, Delete, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, Res, Param, Query, Delete, BadRequestException, NotFoundException, ForbiddenException, Inject } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { createUserSchema, createRoleSchema } from '@ventilyator/validation';
+import { createUserSchema, createRoleSchema, peopleSchema } from '@ventilyator/validation';
+import { input } from '../common/input';
 import { permissionKeys } from '@ventilyator/shared';
 import * as argon2 from 'argon2';
 import { Infrastructure } from '../infrastructure';
@@ -15,9 +16,10 @@ export class AdminController {
     await this.auth.require(req, res, 'system:read');
     return this.infra.status();
   }
-  @Get('users') async users(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  @Get('users') async users(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Query() query: unknown) {
     const u = await this.auth.require(req, res, 'users:manage');
-    return this.infra.db.user.findMany({ where: { organizationId: u.organizationId }, take: 100, orderBy: { createdAt: 'desc' }, select: { id: true, email: true, name: true, active: true, createdAt: true } });
+    const q = input(peopleSchema, query);
+    return this.infra.db.user.findMany({ where: { organizationId: u.organizationId, OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { email: { contains: q.q, mode: 'insensitive' } }] }, take: q.limit, skip: q.offset, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], select: { id: true, email: true, name: true, active: true, createdAt: true, roles: { select: { role: { select: { id: true, name: true } } } }, identities: { select: { provider: true } } } });
   }
   @Post('users') async createUser(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const u = await this.auth.require(req, res, 'users:manage');
@@ -36,8 +38,9 @@ export class AdminController {
     });
   }
   @Get('roles') async roles(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const u = await this.auth.require(req, res, 'users:manage');
-    return this.infra.db.role.findMany({ where: { organizationId: u.organizationId }, include: { permissions: true }, take: 100 });
+    const u = await this.auth.require(req, res);
+    if (!u.permissions.some(p => ['users:manage', 'roles:manage', 'mail:manage'].includes(p))) throw new ForbiddenException();
+    return this.infra.db.role.findMany({ where: { organizationId: u.organizationId }, include: { permissions: true, users: { where: { userId: u.id }, select: { userId: true } }, _count: { select: { users: true } } }, take: 100 });
   }
   @Post('roles') async createRole(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const u = await this.auth.require(req, res, 'roles:manage');

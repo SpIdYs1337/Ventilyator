@@ -2,6 +2,8 @@ import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { createDatabase } from '@ventilyator/database';
 import { readConfig } from '@ventilyator/config';
+import { startMail } from './mail';
+import { startDeadlines } from './deadlines';
 
 async function main() {
   const config = readConfig();
@@ -17,6 +19,8 @@ async function main() {
   worker.on('error', () => console.error('Ventilyator worker queue error'));
   worker.on('failed', () => console.error('Ventilyator worker job failed'));
   await worker.waitUntilReady();
+  const mail = await startMail(db, config);
+  const deadlines = await startDeadlines(db);
   const heartbeat = async () => {
     try { await db.$queryRaw`SELECT 1`; await redis.set('ventilyator:worker:heartbeat', new Date().toISOString(), 'EX', 20); }
     catch { console.error('Ventilyator worker heartbeat failed'); }
@@ -29,6 +33,8 @@ async function main() {
     stopping = true;
     clearInterval(timer);
     await worker.close();
+    await mail.close();
+    deadlines.close();
     await redis.del('ventilyator:worker:heartbeat');
     await redis.quit();
     await db.$disconnect();

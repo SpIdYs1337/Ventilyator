@@ -15,6 +15,9 @@ model Organization {
   audit     AuditEvent[]
   storage   StorageObject[]
   projects  Project[]
+  spaces    KnowledgeSpace[]
+  settings  OrganizationSettings?
+  quota     StorageQuota?
 }
 
 model User {
@@ -37,6 +40,18 @@ model User {
   assignedTasks  Task[] @relation("TaskAssignee")
   taskComments   TaskComment[]
   taskEvents     TaskEvent[]
+  ownedSpaces    KnowledgeSpace[] @relation("SpaceOwner")
+  spaceMemberships SpaceMember[]
+  authoredPages  KnowledgePage[] @relation("PageAuthor")
+  pageRevisions  PageRevision[]
+  pageDrafts     PageDraft[]
+  pageComments   PageComment[]
+  uploads        StorageUpload[]
+  notifications  Notification[]
+  timeEntries    TimeEntry[]
+  taskWatches    TaskWatch[]
+  preferences    UserPreferences?
+  timer          TaskTimer?
   @@unique([id, organizationId])
   @@index([organizationId, active])
 }
@@ -112,6 +127,9 @@ model StorageObject {
   createdAt      DateTime @default(now()) @db.Timestamptz(3)
   deletedAt      DateTime? @db.Timestamptz(3)
   versions       StorageObjectVersion[]
+  attachment     StorageAttachment?
+  uploads        StorageUpload[]
+  @@unique([id, organizationId])
   @@index([organizationId, deletedAt])
 }
 
@@ -175,6 +193,8 @@ model Project {
   updatedAt      DateTime @updatedAt @db.Timestamptz(3)
   members        ProjectMember[]
   tasks          Task[]
+  sprints        Sprint[]
+  workflow       Json?
   @@unique([organizationId, key])
   @@unique([id, organizationId])
   @@index([organizationId, archived, createdAt])
@@ -200,21 +220,40 @@ model Task {
   title          String @db.VarChar(250)
   description    String @default("")
   type           TaskType @default(TASK)
-  status         TaskStatus @default(NEW)
+  status         String @default("NEW") @db.VarChar(40)
   priority       TaskPriority @default(NORMAL)
   authorId       String @db.Uuid
   author         User @relation("TaskAuthor", fields: [authorId, organizationId], references: [id, organizationId], onDelete: Restrict)
   assigneeId     String? @db.Uuid
   assignee       User? @relation("TaskAssignee", fields: [assigneeId, organizationId], references: [id, organizationId], onDelete: Restrict)
   dueAt          DateTime? @db.Timestamptz(3)
+  startsAt       DateTime? @db.Timestamptz(3)
   completedAt    DateTime? @db.Timestamptz(3)
   version        Int @default(1)
   createdAt      DateTime @default(now()) @db.Timestamptz(3)
   updatedAt      DateTime @updatedAt @db.Timestamptz(3)
   comments       TaskComment[]
   events         TaskEvent[]
+  parentId       String? @db.Uuid
+  parent         Task? @relation("Subtasks", fields: [parentId, projectId, organizationId], references: [id, projectId, organizationId], onDelete: Restrict)
+  subtasks       Task[] @relation("Subtasks")
+  sprintId       String? @db.Uuid
+  sprint         Sprint? @relation(fields: [sprintId, projectId, organizationId], references: [id, projectId, organizationId], onDelete: Restrict)
+  labels         String[] @default([])
+  estimateMinutes Int @default(0)
+  storyPoints    Int?
+  checklist      ChecklistItem[]
+  dependencies   TaskDependency[] @relation("TaskDependencies")
+  blockedTasks   TaskDependency[] @relation("BlockedTasks")
+  timeEntries    TimeEntry[]
+  watches        TaskWatch[]
+  attachments    StorageAttachment[]
+  pageLinks      PageTaskLink[]
+  notifications  Notification[]
+  timers         TaskTimer[]
   @@unique([projectId, number])
   @@unique([id, organizationId])
+  @@unique([id, projectId, organizationId])
   @@index([projectId, status, createdAt])
   @@index([organizationId, assigneeId, status])
 }
@@ -242,4 +281,272 @@ model TaskEvent {
   changes        Json
   createdAt      DateTime @default(now()) @db.Timestamptz(3)
   @@index([taskId, createdAt])
+}
+
+model KnowledgeSpace {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  ownerId        String @db.Uuid
+  owner          User @relation("SpaceOwner", fields: [ownerId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  key            String @db.VarChar(20)
+  name           String @db.VarChar(150)
+  description    String @default("")
+  archived       Boolean @default(false)
+  version        Int @default(1)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  members        SpaceMember[]
+  pages          KnowledgePage[]
+  @@unique([organizationId, key])
+  @@unique([id, organizationId])
+}
+
+model SpaceMember {
+  spaceId        String @db.Uuid
+  organizationId String @db.Uuid
+  space          KnowledgeSpace @relation(fields: [spaceId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  userId         String @db.Uuid
+  user           User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  role           ProjectMemberRole @default(MEMBER)
+  @@id([spaceId, userId])
+  @@index([userId, organizationId])
+}
+
+model KnowledgePage {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  spaceId        String @db.Uuid
+  space          KnowledgeSpace @relation(fields: [spaceId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  parentId       String? @db.Uuid
+  parent         KnowledgePage? @relation("PageTree", fields: [parentId, spaceId, organizationId], references: [id, spaceId, organizationId], onDelete: Cascade)
+  children       KnowledgePage[] @relation("PageTree")
+  authorId       String @db.Uuid
+  author         User @relation("PageAuthor", fields: [authorId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  title          String @db.VarChar(250)
+  content        Json @default("{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}")
+  text           String @default("")
+  revision       Int @default(0)
+  sortOrder      Int @default(0)
+  publishedAt    DateTime? @db.Timestamptz(3)
+  archived       Boolean @default(false)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  versions       PageRevision[]
+  drafts         PageDraft[]
+  comments       PageComment[]
+  attachments    StorageAttachment[]
+  taskLinks      PageTaskLink[]
+  notifications  Notification[]
+  @@unique([id, organizationId])
+  @@unique([id, spaceId, organizationId])
+  @@index([spaceId, archived, parentId])
+}
+
+model PageRevision {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  pageId         String @db.Uuid
+  page           KnowledgePage @relation(fields: [pageId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  number         Int
+  title          String
+  content        Json
+  authorId       String @db.Uuid
+  author         User @relation(fields: [authorId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([pageId, number])
+}
+
+model PageDraft {
+  pageId         String @db.Uuid
+  organizationId String @db.Uuid
+  page           KnowledgePage @relation(fields: [pageId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  userId         String @db.Uuid
+  user           User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  baseRevision   Int
+  title          String
+  content        Json
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  @@id([pageId, userId])
+}
+
+model PageComment {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  pageId         String @db.Uuid
+  page           KnowledgePage @relation(fields: [pageId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  authorId       String @db.Uuid
+  author         User @relation(fields: [authorId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  body           String
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  @@index([pageId, createdAt])
+}
+
+model PageTaskLink {
+  pageId         String @db.Uuid
+  taskId         String @db.Uuid
+  organizationId String @db.Uuid
+  page           KnowledgePage @relation(fields: [pageId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  task           Task @relation(fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  @@id([pageId, taskId])
+}
+
+model Sprint {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId      String @db.Uuid
+  project        Project @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  name           String @db.VarChar(150)
+  goal           String @default("")
+  status         String @default("PLANNED")
+  startsAt       DateTime @db.Timestamptz(3)
+  endsAt         DateTime @db.Timestamptz(3)
+  completedAt    DateTime? @db.Timestamptz(3)
+  result         Json?
+  tasks          Task[]
+  @@unique([id, projectId, organizationId])
+  @@index([projectId, status])
+}
+
+model ChecklistItem {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  taskId         String @db.Uuid
+  task           Task @relation(fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  label          String @db.VarChar(500)
+  done           Boolean @default(false)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model TaskDependency {
+  taskId         String @db.Uuid
+  dependsOnId    String @db.Uuid
+  organizationId String @db.Uuid
+  task           Task @relation("TaskDependencies", fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  dependsOn      Task @relation("BlockedTasks", fields: [dependsOnId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  @@id([taskId, dependsOnId])
+}
+
+model TimeEntry {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  taskId         String @db.Uuid
+  task           Task @relation(fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  userId         String @db.Uuid
+  user           User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  minutes        Int
+  note           String @default("")
+  startedAt      DateTime @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  @@index([taskId, startedAt])
+}
+
+model TaskTimer {
+  userId         String @id @db.Uuid
+  user           User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  taskId         String @db.Uuid
+  organizationId String @db.Uuid
+  task           Task @relation(fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  startedAt      DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([userId, organizationId])
+}
+
+model TaskWatch {
+  taskId         String @db.Uuid
+  organizationId String @db.Uuid
+  task           Task @relation(fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  userId         String @db.Uuid
+  user           User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  @@id([taskId, userId])
+}
+
+model StorageAttachment {
+  objectId       String @id @db.Uuid
+  organizationId String @db.Uuid
+  object         StorageObject @relation(fields: [objectId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  taskId         String? @db.Uuid
+  task           Task? @relation(fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  pageId         String? @db.Uuid
+  page           KnowledgePage? @relation(fields: [pageId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  @@unique([objectId, organizationId])
+}
+
+model StorageUpload {
+  id             String @id @default(uuid()) @db.Uuid
+  objectId       String @db.Uuid
+  organizationId String @db.Uuid
+  object         StorageObject @relation(fields: [objectId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  userId         String @db.Uuid
+  user           User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  expectedSize   Int
+  number         Int
+  status         String @default("PENDING")
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt      DateTime @db.Timestamptz(3)
+  @@unique([objectId, number])
+  @@index([organizationId, status])
+}
+
+model StorageQuota {
+  organizationId String @id @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bytes          BigInt @default(10737418240)
+}
+
+model Notification {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  userId         String @db.Uuid
+  user           User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  taskId         String? @db.Uuid
+  task           Task? @relation(fields: [taskId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  pageId         String? @db.Uuid
+  page           KnowledgePage? @relation(fields: [pageId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  eventKey       String
+  title          String
+  href           String
+  readAt         DateTime? @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  email          EmailDelivery?
+  @@unique([userId, eventKey])
+  @@index([userId, readAt, createdAt])
+}
+
+model EmailDelivery {
+  id             String @id @default(uuid()) @db.Uuid
+  notificationId String @unique @db.Uuid
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  status         String @default("PENDING")
+  attempts       Int @default(0)
+  lastError      String?
+  leaseUntil     DateTime? @db.Timestamptz(3)
+  sentAt         DateTime? @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  @@index([status, createdAt])
+}
+
+model UserPreferences {
+  userId         String @id @db.Uuid
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailEnabled   Boolean @default(false)
+  widgets        String[] @default(["tasks", "projects", "knowledge", "activity"])
+}
+
+model OrganizationSettings {
+  organizationId String @id @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  smtpEnabled    Boolean @default(false)
+  smtpHost       String @default("")
+  smtpPort       Int @default(465)
+  smtpMode       String @default("TLS")
+  smtpUser       String @default("")
+  smtpSecret     String?
+  senderEmail    String @default("")
+  senderName     String @default("Ventilyator")
+  imapEnabled    Boolean @default(false)
+  imapHost       String @default("")
+  imapPort       Int @default(993)
+  imapDomain     String? @unique
+  imapAutoCreate Boolean @default(false)
+  imapRoleId     String? @db.Uuid
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
 }

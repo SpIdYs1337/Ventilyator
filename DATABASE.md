@@ -1,18 +1,21 @@
-# PostgreSQL и Prisma
+# База данных
 
-Схема: `packages/database/prisma/schema.prisma`. Первый SQL-файл: `packages/database/prisma/migrations/20261023000100_foundation/migration.sql`. PostgreSQL 18 хранит данные в bind mount `/srv/ventilyator/postgres` → `/var/lib/postgresql`; не меняйте major-версию образа без процедуры миграции PostgreSQL.
+PostgreSQL 18 и Prisma 7 с PostgreSQL adapter. Применяйте только проверенные SQL migrations через `prisma migrate deploy`; db push/reset не предназначены для постоянной установки.
 
-Созданы Organization, User, AuthIdentity, Role, Permission, RolePermission, UserRole, SessionMetadata, AuditEvent, StorageObject и StorageObjectVersion. Используются UUID, FK с явными onDelete, уникальные ключи, индексы и TIMESTAMPTZ(3). Prisma генерирует UUID на стороне приложения. Включён pg_trgm для последующей реализации поиска.
+| Область | Основные таблицы |
+|---|---|
+| Организация/Identity | Organization, User, Role, Permission, RolePermission, UserRole, AuthIdentity, SessionMetadata, AuditEvent |
+| Проекты/задачи | Project, ProjectMember, Task, TaskComment, TaskEvent, Sprint, ChecklistItem, TaskDependency, TaskWatch, TimeEntry, TaskTimer |
+| Знания | KnowledgeSpace, SpaceMember, KnowledgePage, PageDraft, PageRevision, PageComment, PageTaskLink |
+| Файлы | StorageObject, StorageObjectVersion, StorageAttachment, StorageUpload, StorageQuota |
+| Настройки/уведомления | OrganizationSettings, UserPreferences, Notification, EmailDelivery |
 
-Миграция `20261023000200_projects_tasks` добавляет Project, ProjectMember, Task, TaskComment, TaskEvent и enum статусов/типов/приоритетов/ролей. Составные FK с organizationId запрещают межорганизационные связи на уровне PostgreSQL. Номера задач выдаются счётчиком проекта в транзакции; номер уникален в проекте. Version защищает сохранение проекта/задачи от перезаписи устаревшей формой; история записывается в той же транзакции. Изменения участников, архивирование и задачи используют общий advisory lock проекта. Первая миграция не изменена, пользователи/сессии и файловые данные сохраняются.
+Организация и пользователь определяются серверной сессией. Составные FK предотвращают межорганизационные связи проектов, задач, страниц, участников и вложений. Один upload принадлежит одному контексту; XOR task/page закреплён CHECK. Partial unique index допускает один активный спринт на проект; таймер уникален для пользователя. Версия карточки/публикации предотвращает потерю конкурентных изменений. Для записи используются транзакции и advisory locks проекта/пространства/пользователей/квоты.
 
-```bash
-pnpm db:generate
-pnpm db:migrate
-```
+Миграция `20261026000100_knowledge_platform` добавляет модули без пересоздания пользователей. Статус Task преобразуется из enum в VARCHAR(40) через `USING status::text`, сохраняя существующие значения. Стандартным ролям добавляются необходимые разрешения. Старые миграции не изменяются. Уже применённую миграцию не редактируйте.
 
-Production применяет только `prisma migrate deploy`. Не используйте `db push` и destructive reset. Время хранится в UTC; клиент отображает его в часовом поясе браузера.
+Полнотекстовый поиск задач и страниц использует GIN/tsvector с русской и простой конфигурациями; запросы параметризованы, ACL входят в SQL. Project workflow хранится JSON и проверяется схемой/серверными переходами. Содержимое документа — валидируемый JSON плюс текст для поиска; личный PageDraft отделён от опубликованной KnowledgePage, PageRevision неизменяема через API.
 
-Для новой миграции используйте отдельную development-базу и `prisma migrate dev`, затем проверьте SQL и сценарий обновления с существующими данными. Сравните схему после миграций с Prisma schema через `prisma migrate diff`. Не применяйте команду разработки к production-базе.
+EmailDelivery — постоянный outbox; Redis содержит очереди, сессии и heartbeat. Секрет SMTP зашифрован в БД, ключ находится вне неё в storage. Согласованный backup включает PostgreSQL и storage; Redis-сессии при восстановлении не переносятся.
 
-SQL первой миграции проверен в PostgreSQL 18.1 на отдельной временной базе. Затем `prisma migrate deploy` успешно применил миграцию к основной development-базе; `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code` подтвердил отсутствие расхождений. Повторное применение миграций при старте также прошло. Основная база не изменялась ручным выполнением SQL.
+Проверки: `tests/integration/migrations.py` применяет цепочку SQL к отдельной временной базе и проверяет сохранность задачи REVIEW, пользователя и назначение knowledge:create. Schema drift проверяется отдельно; результаты в DEVELOPMENT.md.
