@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { decryptSecret, encryptSecret, mailCa } from '@ventilyator/config';
 import { mailSettingsSchema } from '@ventilyator/validation';
-import type { CurrentUser } from '@ventilyator/shared';
+import { defaultMailConfiguration, type CurrentUser } from '@ventilyator/shared';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import { Infrastructure } from '../infrastructure';
@@ -12,7 +12,7 @@ export class MailService {
   constructor(@Inject(Infrastructure) private readonly infra: Infrastructure) {}
   async settings(user: CurrentUser) {
     const settings = await this.infra.db.organizationSettings.findUnique({ where: { organizationId: user.organizationId } });
-    if (!settings) return null;
+    if (!settings) return { ...defaultMailConfiguration };
     const { smtpSecret, ...publicSettings } = settings;
     return { ...publicSettings, smtpPasswordSet: Boolean(smtpSecret) };
   }

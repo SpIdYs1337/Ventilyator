@@ -1,21 +1,17 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@ventilyator/ui';
-import type { CurrentUser } from '@ventilyator/shared';
+import { defaultMailConfiguration, type CurrentUser, type MailConfiguration as Settings } from '@ventilyator/shared';
 import { api } from '../lib/api';
 import { ErrorMessage, Loading } from '../components/common';
-interface Settings {
-  smtpEnabled: boolean; smtpHost: string; smtpPort: number; smtpMode: 'TLS' | 'STARTTLS'; smtpUser: string; senderEmail: string; senderName: string; smtpPasswordSet?: boolean;
-  imapEnabled: boolean; imapHost: string; imapPort: number; imapDomain: string | null; imapAutoCreate: boolean; imapRoleId: string | null;
-}
-const defaults: Settings = { smtpEnabled: false, smtpHost: '', smtpPort: 465, smtpMode: 'TLS', smtpUser: '', senderEmail: '', senderName: 'Ventilyator', imapEnabled: false, imapHost: '', imapPort: 993, imapDomain: null, imapAutoCreate: false, imapRoleId: null };
+const defaults = defaultMailConfiguration;
 export function MailSettings({ user }: { user: CurrentUser }) {
   const settings = useQuery({ queryKey: ['mail-settings'], queryFn: () => api<Settings | null>('/admin/mail') });
-  const roles = useQuery({ queryKey: ['roles'], queryFn: () => api<{ id: string; name: string; permissions: { permission: string }[] }[]>('/admin/roles'), enabled: user.permissions.includes('users:manage') });
+  const roles = useQuery({ queryKey: ['roles'], queryFn: () => api<{ id: string; name: string; permissions: { permission: string }[] }[]>('/admin/roles'), enabled: user.permissions.includes('mail:manage') });
   const deliveries = useQuery({ queryKey: ['mail-deliveries'], queryFn: () => api<{ id: string; status: string; attempts: number; lastError: string | null; createdAt: string; notification: { title: string; user: { email: string } } }[]>('/admin/mail/deliveries'), refetchInterval: 10000 });
   if (settings.isLoading) return <Loading />;
   if (settings.isError) return <ErrorMessage error={settings.error} />;
-  return <><MailForm initial={settings.data ?? defaults} roles={roles.data ?? []} /><section className="panel info-panel"><h2>Журнал доставки</h2><p>Письма отправляет фоновый обработчик с повторными попытками. Ошибки не содержат сохранённых паролей.</p>{deliveries.isError && <ErrorMessage error={deliveries.error} />}<div className="table-scroll"><table><thead><tr><th>Время</th><th>Получатель и событие</th><th>Состояние</th><th>Попытки</th></tr></thead><tbody>{deliveries.data?.map(item => <tr key={item.id}><td>{new Date(item.createdAt).toLocaleString('ru-RU')}</td><td>{item.notification.user.email}<p className="muted">{item.notification.title}</p></td><td>{({ PENDING: 'В очереди', SENDING: 'Отправляется', SENT: 'Отправлено', FAILED: 'Ошибка', SKIPPED: 'Пропущено' } as Record<string, string>)[item.status] ?? item.status}{item.lastError && <p className="muted">{item.lastError === 'SMTP_DELIVERY_FAILED' ? 'Проверьте SMTP и журнал сервера' : 'Доставка отключена или доступ отозван'}</p>}</td><td>{item.attempts}</td></tr>)}</tbody></table></div>{!deliveries.data?.length && <p className="muted">Отправок пока не было.</p>}</section></>;
+  return <>{roles.isError && <ErrorMessage error={roles.error} />}<MailForm initial={settings.data ?? defaults} roles={roles.data ?? []} /><section className="panel info-panel"><h2>Журнал доставки</h2><p>Письма отправляет фоновый обработчик с повторными попытками. Ошибки не содержат сохранённых паролей.</p>{deliveries.isError && <ErrorMessage error={deliveries.error} />}<div className="table-scroll"><table><thead><tr><th>Время</th><th>Получатель и событие</th><th>Состояние</th><th>Попытки</th></tr></thead><tbody>{deliveries.data?.map(item => <tr key={item.id}><td>{new Date(item.createdAt).toLocaleString('ru-RU')}</td><td>{item.notification.user.email}<p className="muted">{item.notification.title}</p></td><td>{({ PENDING: 'В очереди', SENDING: 'Отправляется', SENT: 'Отправлено', FAILED: 'Ошибка', SKIPPED: 'Пропущено' } as Record<string, string>)[item.status] ?? item.status}{item.lastError && <p className="muted">{item.lastError === 'SMTP_DELIVERY_FAILED' ? 'Проверьте SMTP и журнал сервера' : 'Доставка отключена или доступ отозван'}</p>}</td><td>{item.attempts}</td></tr>)}</tbody></table></div>{!deliveries.data?.length && <p className="muted">Отправок пока не было.</p>}</section></>;
 }
 function MailForm({ initial, roles }: { initial: Settings; roles: { id: string; name: string; permissions: { permission: string }[] }[] }) {
   const [smtpEnabled, setSmtpEnabled] = useState(initial.smtpEnabled), [imapEnabled, setImapEnabled] = useState(initial.imapEnabled), [auto, setAuto] = useState(initial.imapAutoCreate);

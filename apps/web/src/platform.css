@@ -4,3 +4,35 @@
 @media print{.sidebar,.topbar,footer,.back-link,.page-heading,.tabs,.page-tree,.document-tools,.document-meta,.attachments,.document-comments,.editor-savebar,.mobile-menu{display:none!important}.app-shell,.main-shell,.content,.knowledge-layout,.knowledge-main{display:block!important;width:100%!important;margin:0!important;padding:0!important;max-width:none!important;background:white!important;color:black!important}.document-panel{border:0;box-shadow:none;padding:0}.document-title{font-size:26pt}.rich-document{font-size:11pt;line-height:1.6;color:black}.rich-document pre{white-space:pre-wrap;border:1px solid #ccc;background:#f6f6f6;color:black}.rich-document table{break-inside:avoid}.rich-document a{color:black}}
 
 .upload-label{flex-direction:row!important}.file-preview{max-width:100%;height:auto;display:block;margin:20px auto}.document-import{display:flex;justify-content:flex-end;margin-bottom:14px}.document-toc{border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:14px 18px;margin:0 0 22px;font-size:12px}.document-toc nav{display:flex;flex-direction:column;gap:7px;margin-top:14px}.document-toc a{color:var(--green);font-size:11px}.document-task-links{margin:25px 0;border-top:1px solid var(--line);padding-top:10px}.permission-list{display:flex;flex-direction:column;gap:12px}.password-form{max-width:450px}.login-story{background:#edf0fa}.login-story p{color:#677798}.story-lines{color:#50679c}.dark .login-story{background:#202d49;color:#e1e8fa}
+
+/* Compact layout follows responsive rules so density is not overwritten. */
+.top-actions button[aria-label="Компактный режим"][aria-pressed="true"] {
+  color: var(--green);
+  background: var(--soft);
+}
+@media screen and (min-width: 761px) {
+  .compact .sidebar { width: 76px; padding: 20px 12px; }
+  .compact .sidebar .brand { justify-content: center; }
+  .compact .sidebar .brand > span:last-child,
+  .compact .sidebar .sidebar-label,
+  .compact .sidebar .sidebar-bottom,
+  .compact .sidebar .nav-label { display: none; }
+  .compact .sidebar nav { margin-top: 24px; gap: 4px; }
+  .compact .sidebar nav a { justify-content: center; gap: 0; padding: 12px; }
+  .compact .main-shell { margin-left: 76px; width: calc(100% - 76px); }
+  .compact .topbar { height: 60px; }
+  .compact .content { padding: 20px 24px; }
+  .compact .page-heading { margin-bottom: 20px; }
+  .compact .metric { padding: 18px; }
+  .compact .dashboard-widget,
+  .compact .info-panel,
+  .compact .document-panel { padding: 18px; }
+  .compact .dashboard-grid,
+  .compact .task-extra-grid,
+  .compact .settings-grid { gap: 14px; }
+  .compact th, .compact td { padding: 10px 14px; }
+}
+@media screen and (max-width: 760px) {
+  .top-actions button[aria-label="Компактный режим"] { display: inline-flex; }
+  .compact .content { padding: 16px; }
+}

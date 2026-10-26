@@ -203,6 +203,16 @@ async function main() {
       assert.equal((await request(`/admin/roles/${roles.viewer.id}`, { method: 'DELETE', cookie: admin })).status, 409);
       assert.equal((await request(`/admin/roles/${created.body.id}`, { method: 'DELETE', cookie: admin })).status, 200);
     });
+    await check('mail settings return JSON defaults before first save without creating a database row', async () => {
+      assert.equal(await db.organizationSettings.findUnique({ where: { organizationId: org.id } }), null);
+      const initial = await request('/admin/mail', { cookie: admin });
+      assert.equal(initial.status, 200); assert.ok(initial.headers.get('content-type')?.includes('application/json'));
+      assert.equal(initial.body.imapEnabled, false); assert.equal(initial.body.imapPort, 993);
+      assert.equal(initial.body.smtpEnabled, false); assert.equal(initial.body.smtpPort, 465); assert.equal(initial.body.smtpPasswordSet, false);
+      assert.equal(initial.body.imapDomain, null); assert.ok(!('smtpSecret' in initial.body));
+      assert.equal(await db.organizationSettings.findUnique({ where: { organizationId: org.id } }), null);
+      assert.equal((await request('/admin/mail', { cookie: editor })).status, 403);
+    });
     const smtpUser = 'fixture', smtpPassword = randomBytes(24).toString('base64url');
     mail = await mailFixture({ smtpUser, smtpPassword, imapPassword: password });
     const settings = { smtpEnabled: true, smtpHost: 'ventilyator-api', smtpPort: mail.smtpPort, smtpMode: 'TLS', smtpUser, smtpPassword, senderEmail: 'fixture@example.org', senderName: 'Ventilyator fixture', imapEnabled: true, imapHost: 'ventilyator-api', imapPort: mail.imapPort, imapDomain: 'example.org', imapAutoCreate: false, imapRoleId: roles.viewer.id };

@@ -123,7 +123,7 @@ S=/knowledge/spaces/:spaceId, D=S/pages/:pageId.
 | PUT /admin/users/:id/imap | users:manage; enabled, явное связывание |
 | POST /auth/password | currentPassword,password; проверка текущего и отзыв сессий |
 | PUT/DELETE /admin/roles/:id | roles:manage; name/permissions / удалить только неиспользуемую |
-| GET/PUT /admin/mail | mail:manage; настройки без выдачи секретов / сохранить |
+| GET/PUT /admin/mail | mail:manage; настройки без выдачи секретов (до первого сохранения — JSON с выключенными опциями по умолчанию) / сохранить |
 | POST /admin/mail/test-smtp | Проверить сохранённый TLS/STARTTLS SMTP |
 | POST /admin/mail/test-email | Поставить тестовое письмо себе в outbox |
 | POST /admin/mail/test-imap | email,password, настоящий TLS IMAP LOGIN без сохранения пароля |

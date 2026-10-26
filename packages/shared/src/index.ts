@@ -13,3 +13,4 @@ export interface CurrentUser { id: string; email: string; name: string; organiza
 export interface SystemStatus { postgres: boolean; redis: boolean; storage: boolean; worker: boolean }
 export * from './work';
 export * from './knowledge';
+export * from './mail';
